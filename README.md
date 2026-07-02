@@ -35,5 +35,6 @@ TASK 1-10实施计划
 - [审查报告目录规范](./docs/reviews/README.md)
 - [Task 1 第 1 次审查报告](./docs/reviews/task-01/review-01/README.md)
 - [Task 1 第 2 次审查报告](./docs/reviews/task-01/review-02/README.md)
+- [Task 1 第 3 次审查报告](./docs/reviews/task-01/review-03/README.md)
 - 运行手册：待创建（Task 10 交付）
 - 更多审查报告按 Task 逐步追加到 `docs/reviews/`

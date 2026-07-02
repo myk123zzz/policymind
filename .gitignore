@@ -13,6 +13,7 @@ env/
 
 # Environment
 .env
+*.db
 
 # IDE
 .vscode/
