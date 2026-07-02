@@ -1,6 +1,6 @@
 import asyncio
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 
 class ObjectStorage(Protocol):
@@ -45,7 +45,7 @@ class LocalObjectStorage:
 
 
 class S3ObjectStorage:
-    """S3/MinIO 对象存储（Task 4+ 完整实现）。"""
+    """S3/MinIO 对象存储适配器。"""
 
     def __init__(
         self,
@@ -53,17 +53,60 @@ class S3ObjectStorage:
         access_key: str,
         secret_key: str,
         bucket: str,
+        secure: bool = False,
     ) -> None:
-        self.endpoint = endpoint
-        self.access_key = access_key
-        self.secret_key = secret_key
+        self._endpoint = endpoint
+        self._access_key = access_key
+        self._secret_key = secret_key
         self.bucket = bucket
+        self._secure = secure
+        self._client: Any = None
+
+    def _get_client(self) -> Any:
+        if self._client is None:
+            from minio import Minio
+
+            self._client = Minio(
+                endpoint=self._endpoint,
+                access_key=self._access_key,
+                secret_key=self._secret_key,
+                secure=self._secure,
+            )
+            if not self._client.bucket_exists(self.bucket):
+                self._client.make_bucket(self.bucket)
+        return self._client
 
     async def put(self, key: str, content: bytes, content_type: str) -> None:
-        raise NotImplementedError("S3 storage will be implemented in Task 4")
+        import asyncio
+        from io import BytesIO
+
+        client = self._get_client()
+        await asyncio.to_thread(
+            client.put_object,
+            bucket_name=self.bucket,
+            object_name=key,
+            data=BytesIO(content),
+            length=len(content),
+            content_type=content_type,
+        )
 
     async def get(self, key: str) -> bytes:
-        raise NotImplementedError("S3 storage will be implemented in Task 4")
+        import asyncio
+
+        client = self._get_client()
+        response = await asyncio.to_thread(
+            client.get_object,
+            bucket_name=self.bucket,
+            object_name=key,
+        )
+        return await asyncio.to_thread(response.read)
 
     async def delete(self, key: str) -> None:
-        raise NotImplementedError("S3 storage will be implemented in Task 4")
+        import asyncio
+
+        client = self._get_client()
+        await asyncio.to_thread(
+            client.remove_object,
+            bucket_name=self.bucket,
+            object_name=key,
+        )
