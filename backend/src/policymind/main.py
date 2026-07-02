@@ -1,21 +1,10 @@
-from typing import TYPE_CHECKING
-
 from fastapi import FastAPI
 
-if TYPE_CHECKING:
-    from policymind.core.config import Settings  # type: ignore[import-untyped]  # Task 2
-    from policymind.core.container import ServiceContainer  # type: ignore[import-untyped]  # Task 2
 
-
-def create_app(
-    settings: "Settings | None" = None,
-    container: "ServiceContainer | None" = None,
-) -> FastAPI:
+def create_app() -> FastAPI:
     """创建 FastAPI 应用实例。
 
-    Args:
-        settings: 应用配置，测试时可传入内存配置覆盖环境变量。
-        container: 服务容器，测试时可传入内存适配器。
+    Task 2 将扩展为 create_app(settings, container) 以支持依赖注入。
     """
     app = FastAPI(title="PolicyMind")
 
