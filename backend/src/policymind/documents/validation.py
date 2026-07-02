@@ -1,5 +1,7 @@
 import uuid
+import zipfile
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 
 import filetype  # type: ignore[import-untyped]
@@ -78,12 +80,15 @@ def validate_upload(
     # 检查文件魔数
     kind = filetype.guess(content)
     if kind is None:
-        # 宽松处理：某些合法文件 filetype 可能无法识别
         pass
     elif kind.mime != expected_mime:
         raise ValueError(
             f"File magic number mismatch: detected {kind.mime}, expected {expected_mime}"
         )
+
+    # Office 文件检查 ZIP 内部结构
+    if ext in {".docx", ".xlsx"}:
+        _validate_office_zip(content, ext)
 
     return ValidatedUpload(
         filename=filename,
@@ -91,6 +96,23 @@ def validate_upload(
         content=content,
         size_bytes=len(content),
     )
+
+
+def _validate_office_zip(content: bytes, ext: str) -> None:
+    """验证 Office 文件 ZIP 内部结构。"""
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as zf:
+            names = set(zf.namelist())
+    except zipfile.BadZipFile:
+        raise ValueError(f"File is not a valid ZIP archive (expected {ext})")
+
+    if ext == ".docx":
+        required = "[Content_Types].xml"
+    else:
+        required = "[Content_Types].xml"
+
+    if required not in names:
+        raise ValueError(f"Office file missing required entry: {required}")
 
 
 def safe_storage_key(tenant_id: int, suffix: str) -> str:

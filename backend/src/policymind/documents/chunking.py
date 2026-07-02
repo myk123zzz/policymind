@@ -1,7 +1,7 @@
 import hashlib
 import re
 
-from policymind.documents.models import Chunk, DocumentBlock, ParsedDocument
+from policymind.documents.models import Chunk, ChunkContext, DocumentBlock, ParsedDocument
 
 
 class HierarchicalChunker:
@@ -18,19 +18,12 @@ class HierarchicalChunker:
     def chunk(
         self,
         document: ParsedDocument,
-        document_version_id: int,
-        tenant_id: int = 1,
-        document_id: int = 0,
+        context: ChunkContext,
     ) -> list[Chunk]:
         chunks: list[Chunk] = []
 
         for block in document.blocks:
-            block_chunks = self._chunk_block(
-                block=block,
-                document_version_id=document_version_id,
-                tenant_id=tenant_id,
-                document_id=document_id,
-            )
+            block_chunks = self._chunk_block(block=block, context=context)
             chunks.extend(block_chunks)
 
         return chunks
@@ -38,59 +31,48 @@ class HierarchicalChunker:
     def _chunk_block(
         self,
         block: DocumentBlock,
-        document_version_id: int,
-        tenant_id: int,
-        document_id: int,
+        context: ChunkContext,
     ) -> list[Chunk]:
         text = block.text.strip()
         if not text:
             return []
 
-        # 表格不分块——整个表格作为一个 parent 和可能多个 leaf
         if block.block_type == "table":
-            return self._chunk_table(
-                block, document_version_id, tenant_id, document_id
-            )
+            return self._chunk_table(block, context)
 
-        # 生成 parent chunk
         parent_id = self._make_chunk_id(
-            document_version_id, block.page_number, block.bbox, text, "parent"
+            context.document_version_id,
+            block.page_number,
+            block.bbox,
+            text,
+            "parent",
         )
-        parent = Chunk(
-            id=parent_id,
-            tenant_id=tenant_id,
-            document_id=document_id,
-            document_version_id=document_version_id,
+        parent = self._make_chunk(
+            chunk_id=parent_id,
             parent_id=None,
             level="parent",
             text=text[: self.parent_size],
-            page_number=block.page_number,
-            heading_path=block.heading_path,
-            bbox=block.bbox,
+            block=block,
+            context=context,
         )
         chunks: list[Chunk] = [parent]
 
-        # 分割为 leaf chunks
         if len(text) <= self.leaf_size:
             leaf_id = self._make_chunk_id(
-                document_version_id,
+                context.document_version_id,
                 block.page_number,
                 block.bbox,
                 text,
                 "leaf",
             )
             chunks.append(
-                Chunk(
-                    id=leaf_id,
-                    tenant_id=tenant_id,
-                    document_id=document_id,
-                    document_version_id=document_version_id,
+                self._make_chunk(
+                    chunk_id=leaf_id,
                     parent_id=parent_id,
                     level="leaf",
                     text=text,
-                    page_number=block.page_number,
-                    heading_path=block.heading_path,
-                    bbox=block.bbox,
+                    block=block,
+                    context=context,
                 )
             )
         else:
@@ -100,24 +82,20 @@ class HierarchicalChunker:
                 if not leaf_text.strip():
                     continue
                 leaf_id = self._make_chunk_id(
-                    document_version_id,
+                    context.document_version_id,
                     block.page_number,
                     block.bbox,
                     leaf_text,
                     f"leaf-{start}",
                 )
                 chunks.append(
-                    Chunk(
-                        id=leaf_id,
-                        tenant_id=tenant_id,
-                        document_id=document_id,
-                        document_version_id=document_version_id,
+                    self._make_chunk(
+                        chunk_id=leaf_id,
                         parent_id=parent_id,
                         level="leaf",
                         text=leaf_text,
-                        page_number=block.page_number,
-                        heading_path=block.heading_path,
-                        bbox=block.bbox,
+                        block=block,
+                        context=context,
                     )
                 )
 
@@ -126,14 +104,10 @@ class HierarchicalChunker:
     def _chunk_table(
         self,
         block: DocumentBlock,
-        document_version_id: int,
-        tenant_id: int,
-        document_id: int,
+        context: ChunkContext,
     ) -> list[Chunk]:
-        """表格：header + 前几行作为一个 chunk，后续行按需分割。"""
         lines = block.text.strip().split("\n")
         if len(lines) < 3:
-            # 太小，当作普通文本
             return self._chunk_block(
                 DocumentBlock(
                     text=block.text,
@@ -142,54 +116,77 @@ class HierarchicalChunker:
                     heading_path=block.heading_path,
                     bbox=block.bbox,
                 ),
-                document_version_id,
-                tenant_id,
-                document_id,
+                context,
             )
 
         parent_id = self._make_chunk_id(
-            document_version_id, block.page_number, block.bbox, block.text, "parent"
+            context.document_version_id,
+            block.page_number,
+            block.bbox,
+            block.text,
+            "parent",
         )
-        parent = Chunk(
-            id=parent_id,
-            tenant_id=tenant_id,
-            document_id=document_id,
-            document_version_id=document_version_id,
+        parent = self._make_chunk(
+            chunk_id=parent_id,
             parent_id=None,
             level="parent",
             text=block.text[: self.parent_size],
-            page_number=block.page_number,
-            heading_path=block.heading_path,
-            bbox=block.bbox,
+            block=block,
+            context=context,
         )
         chunks: list[Chunk] = [parent]
 
-        # Header + 前两行数据组成第一个 leaf
         batch_parts = [lines[0]]
         if len(lines) > 1:
             batch_parts.append(lines[1])
         if len(lines) > 2:
             batch_parts.append(lines[2])
         first_batch = "\n".join(batch_parts)
+
         leaf_id = self._make_chunk_id(
-            document_version_id, block.page_number, block.bbox, first_batch, "leaf-0"
+            context.document_version_id,
+            block.page_number,
+            block.bbox,
+            first_batch,
+            "leaf-0",
         )
         chunks.append(
-            Chunk(
-                id=leaf_id,
-                tenant_id=tenant_id,
-                document_id=document_id,
-                document_version_id=document_version_id,
+            self._make_chunk(
+                chunk_id=leaf_id,
                 parent_id=parent_id,
                 level="leaf",
                 text=first_batch,
-                page_number=block.page_number,
-                heading_path=block.heading_path,
-                bbox=block.bbox,
+                block=block,
+                context=context,
             )
         )
 
         return chunks
+
+    @staticmethod
+    def _make_chunk(
+        chunk_id: str,
+        parent_id: str | None,
+        level: str,
+        text: str,
+        block: DocumentBlock,
+        context: ChunkContext,
+    ) -> Chunk:
+        return Chunk(
+            id=chunk_id,
+            tenant_id=context.tenant_id,
+            document_id=context.document_id,
+            document_version_id=context.document_version_id,
+            parent_id=parent_id,
+            level=level,  # type: ignore[arg-type]
+            text=text,
+            page_number=block.page_number,
+            heading_path=block.heading_path,
+            bbox=block.bbox,
+            access_level=context.access_level,
+            effective_from=context.effective_from,
+            effective_to=context.effective_to,
+        )
 
     @staticmethod
     def _make_chunk_id(

@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Literal
 
 
@@ -21,6 +22,16 @@ class ParsedDocument:
 
 
 @dataclass(slots=True)
+class ChunkContext:
+    document_version_id: int
+    tenant_id: int
+    document_id: int
+    access_level: int = 1
+    effective_from: datetime | None = None
+    effective_to: datetime | None = None
+
+
+@dataclass(slots=True)
 class Chunk:
     id: str
     tenant_id: int
@@ -33,3 +44,5 @@ class Chunk:
     heading_path: tuple[str, ...] = ()
     bbox: tuple[float, float, float, float] | None = None
     access_level: int = 1
+    effective_from: datetime | None = None
+    effective_to: datetime | None = None
