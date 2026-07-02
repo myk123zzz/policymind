@@ -8,6 +8,7 @@ from policymind.infrastructure.postgres.base import Base
 
 # 导入所有模型以确保迁移包含所有表
 import policymind.auth.models  # noqa: F401
+import policymind.documents.orm  # noqa: F401
 
 config = context.config
 
