@@ -5,9 +5,12 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from policymind.core.config import Settings
 from policymind.infrastructure.postgres.base import Base
+from policymind.infrastructure.postgres.session import get_db_session
 
 
 @pytest.fixture(scope="session")
@@ -20,6 +23,14 @@ def event_loop():
 @pytest_asyncio.fixture(scope="session")
 async def engine():
     engine = create_async_engine("sqlite+aiosqlite://", echo=False)
+
+    # 启用 SQLite 外键约束
+    @event.listens_for(engine.sync_engine, "connect")
+    def _set_sqlite_pragma(dbapi_connection, connection_record):  # noqa: ARG001
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield engine
@@ -39,10 +50,27 @@ async def db_session(engine) -> AsyncGenerator[AsyncSession, None]:
 def app(db_session) -> FastAPI:
     from policymind.main import create_app
 
-    async def _get_test_session():
+    app_inst = create_app(
+        settings=Settings(
+            JWT_SECRET="test-secret-key-for-testing-only-32chars",
+            DATABASE_URL="sqlite+aiosqlite://",
+        )
+    )
+
+    # 覆盖 session factory 为测试 session
+    async def _override_get_db():
         yield db_session
 
-    return create_app(get_session=_get_test_session)
+    app_inst.dependency_overrides[get_db_session] = _override_get_db
+    return app_inst
+
+
+@pytest.fixture
+def test_settings() -> Settings:
+    return Settings(
+        JWT_SECRET="test-secret-key-for-testing-only-32chars",
+        DATABASE_URL="sqlite+aiosqlite://",
+    )
 
 
 @pytest.fixture

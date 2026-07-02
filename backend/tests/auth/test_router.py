@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from policymind.auth.models import Tenant, User
 from policymind.auth.security import create_access_token, hash_password
+from policymind.core.config import Settings
 
 
 @pytest_asyncio.fixture
@@ -45,9 +46,10 @@ async def disabled_user(db_session: AsyncSession, auth_tenant: Tenant) -> User:
     return u
 
 
-def token_for(user: User) -> str:
+def token_for(user: User, settings: Settings | None = None) -> str:
     return create_access_token(
-        data={"sub": str(user.id), "tenant_id": user.tenant_id, "role": user.role}
+        data={"sub": str(user.id), "tenant_id": user.tenant_id, "role": user.role},
+        settings=settings,
     )
 
 
@@ -85,12 +87,12 @@ def test_login_invalid_credentials_returns_401(
 
 
 def test_auth_me_returns_user_info(
-    client: TestClient, active_user: User
+    client: TestClient, active_user: User, test_settings: Settings
 ) -> None:
     """认证后 /auth/me 返回当前用户信息。"""
     response = client.get(
         "/api/v1/auth/me",
-        headers={"Authorization": f"Bearer {token_for(active_user)}"},
+        headers={"Authorization": f"Bearer {token_for(active_user, test_settings)}"},
     )
     assert response.status_code == 200
     data = response.json()
@@ -99,10 +101,10 @@ def test_auth_me_returns_user_info(
 
 
 def test_disabled_user_cannot_reuse_token(
-    client: TestClient, disabled_user: User
+    client: TestClient, disabled_user: User, test_settings: Settings
 ) -> None:
     """禁用用户的 Token 立即失效。"""
-    token = token_for(disabled_user)
+    token = token_for(disabled_user, test_settings)
     response = client.get(
         "/api/v1/auth/me",
         headers={"Authorization": f"Bearer {token}"},

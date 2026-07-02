@@ -1,39 +1,39 @@
-from collections.abc import AsyncGenerator, Callable
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from policymind.auth.router import router as auth_router
 from policymind.core.config import Settings, get_settings
 from policymind.core.errors import PolicyMindError
+from policymind.core.logging import setup_logging
+from policymind.infrastructure.postgres.session import (
+    create_engine,
+    create_session_factory,
+)
 
 
 def create_app(
     settings: Settings | None = None,
-    get_session: Callable[
-        [], AsyncGenerator[AsyncSession, None]
-    ] | None = None,
 ) -> FastAPI:
     """创建 FastAPI 应用实例。
 
     Args:
         settings: 应用配置，测试时传入覆盖环境变量。
-        get_session: 数据库会话工厂，测试时传入固定 session 的生成器。
     """
-    app = FastAPI(title="PolicyMind")
-
-    app.include_router(auth_router)
-
     if settings is None:
         settings = get_settings()
+
+    setup_logging()
+
+    app = FastAPI(title="PolicyMind")
     app.state.settings = settings
 
-    # 注入数据库会话依赖
-    if get_session is not None:
-        from policymind.infrastructure.postgres.session import get_db_session
+    # 创建应用级 engine 和 session factory
+    engine = create_engine(settings.DATABASE_URL)
+    app.state.engine = engine
+    app.state.session_factory = create_session_factory(engine)
 
-        app.dependency_overrides[get_db_session] = get_session
+    app.include_router(auth_router)
 
     @app.get("/health/live")
     async def health_live() -> dict[str, str]:
@@ -52,7 +52,6 @@ def create_app(
             content={
                 "code": exc.code,
                 "message": exc.public_message,
-                "detail": exc.detail,
             },
         )
 

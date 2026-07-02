@@ -55,3 +55,7 @@ def validate_production_settings(settings: Settings) -> None:
         raise ValueError("JWT_SECRET must be at least 32 characters in production")
     if "*" in settings.CORS_ORIGINS:
         raise ValueError("CORS_ORIGINS must not contain wildcard '*' in production")
+    if "sqlite" in settings.DATABASE_URL or settings.DATABASE_URL == "":
+        raise ValueError("DATABASE_URL must be a production database in production")
+    if not settings.REDIS_URL:
+        raise ValueError("REDIS_URL is required in production")

@@ -1,5 +1,6 @@
 import hashlib
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 from pydantic import SecretStr
 from sqlalchemy import select
@@ -16,30 +17,47 @@ from policymind.auth.security import (
 )
 from policymind.core.errors import AuthorizationDenied
 
+if TYPE_CHECKING:
+    from policymind.core.config import Settings
+
 
 class AuthService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        settings: "Settings | None" = None,
+    ) -> None:
         self.session = session
+        self.settings = settings
 
     async def register(self, request: RegisterRequest) -> User:
         """注册新用户；tenant_id 来自邀请码，不允许自行指定。"""
-        # 模拟从邀请码解析租户（Task 3+ 实现真实邀请系统）
-        tenant_id = 1  # default tenant for now
+        # 解析邀请码找到租户（简易实现：token 以 "invite-" 开头，取后续部分作为 slug）
+        if not request.invitation_token.startswith("invite-"):
+            raise AuthorizationDenied("Invalid invitation token.")
+
+        tenant_slug = request.invitation_token.removeprefix("invite-")
+        result = await self.session.execute(
+            select(Tenant).where(Tenant.slug == tenant_slug)
+        )
+        tenant: Tenant | None = result.scalar_one_or_none()
+        if not tenant:
+            raise AuthorizationDenied("Invalid invitation token.")
 
         # 检查用户名在租户内唯一
-        result = await self.session.execute(
+        existing = await self.session.execute(
             select(User).where(
-                User.tenant_id == tenant_id, User.username == request.username
+                User.tenant_id == tenant.id, User.username == request.username
             )
         )
-        if result.scalar_one_or_none():
+        if existing.scalar_one_or_none():
             raise AuthorizationDenied("Username already exists in this tenant.")
 
         user = User(
-            tenant_id=tenant_id,
+            tenant_id=tenant.id,
             username=request.username,
             password_hash=hash_password(request.password),
-            role="employee",  # 不允许注册时自行指定角色
+            role="employee",
             access_level=1,
             is_active=True,
         )
@@ -51,7 +69,6 @@ class AuthService:
         self, tenant_slug: str, username: str, password: SecretStr
     ) -> TokenPair:
         """验证凭证并返回 Token 对。"""
-        # 查找租户
         tenant_result = await self.session.execute(
             select(Tenant).where(Tenant.slug == tenant_slug)
         )
@@ -59,7 +76,6 @@ class AuthService:
         if not tenant:
             raise AuthorizationDenied("Invalid credentials.")
 
-        # 查找用户
         user_result = await self.session.execute(
             select(User).where(
                 User.tenant_id == tenant.id, User.username == username
@@ -79,9 +95,8 @@ class AuthService:
 
     async def refresh(self, refresh_token_str: str) -> TokenPair:
         """使用 Refresh Token 获取新 Token 对；旧 Refresh Token 撤销。"""
-        # 解码并验证
         try:
-            payload = decode_token(refresh_token_str)
+            payload = decode_token(refresh_token_str, settings=self.settings)
         except ValueError:
             raise AuthorizationDenied("Invalid refresh token.")
 
@@ -99,12 +114,12 @@ class AuthService:
         if not stored:
             raise AuthorizationDenied("Refresh token revoked or not found.")
 
-        # 撤销旧 token
         stored.revoked = True
 
-        # 查找用户
         user_id = int(str(payload["sub"]))
-        user_result = await self.session.execute(select(User).where(User.id == user_id))
+        user_result = await self.session.execute(
+            select(User).where(User.id == user_id)
+        )
         user: User | None = user_result.scalar_one_or_none()
         if not user or not user.is_active:
             raise AuthorizationDenied("User not found or disabled.")
@@ -130,10 +145,11 @@ class AuthService:
             "access_level": user.access_level,
             "token_version": user.token_version,
         }
-        access_token = create_access_token(data=token_data)
-        refresh_token_str = create_refresh_token(data=token_data)
+        access_token = create_access_token(data=token_data, settings=self.settings)
+        refresh_token_str = create_refresh_token(
+            data=token_data, settings=self.settings
+        )
 
-        # 存储 refresh token 哈希
         rt = RefreshToken(
             user_id=user.id,
             token_hash=hashlib.sha256(refresh_token_str.encode()).hexdigest(),
