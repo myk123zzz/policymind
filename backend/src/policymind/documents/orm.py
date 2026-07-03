@@ -43,3 +43,19 @@ class DocumentVersion(Base):
     processing_status: Mapped[str] = mapped_column(String(30), default="queued")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class IngestionJob(Base):
+    __tablename__ = "ingestion_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    document_version_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("document_versions.id"), nullable=False
+    )
+    stage: Mapped[str] = mapped_column(String(30), default="queued")
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

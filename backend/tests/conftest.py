@@ -8,6 +8,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+# 确保所有 ORM 模型表在测试数据库中创建
+import policymind.auth.models  # noqa: F401
+import policymind.documents.orm  # noqa: F401
 from policymind.core.config import Settings
 from policymind.infrastructure.postgres.base import Base
 from policymind.infrastructure.postgres.session import get_db_session

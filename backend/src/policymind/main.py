@@ -6,6 +6,7 @@ from policymind.auth.router import router as auth_router
 from policymind.core.config import Settings, get_settings
 from policymind.core.errors import PolicyMindError
 from policymind.core.logging import setup_logging
+from policymind.documents.router import router as documents_router
 from policymind.infrastructure.postgres.session import (
     create_engine,
     create_session_factory,
@@ -34,6 +35,7 @@ def create_app(
     app.state.session_factory = create_session_factory(engine)
 
     app.include_router(auth_router)
+    app.include_router(documents_router)
 
     @app.get("/health/live")
     async def health_live() -> dict[str, str]:
