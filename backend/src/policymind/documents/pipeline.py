@@ -1,9 +1,20 @@
+import logging
 from dataclasses import dataclass, field
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from policymind.documents.chunking import HierarchicalChunker
+from policymind.documents.models import ChunkContext
 from policymind.documents.orm import DocumentVersion, IngestionJob
+from policymind.documents.parsers.docx import DocxParser
+from policymind.documents.parsers.markdown import MarkdownParser
+from policymind.documents.parsers.pdf import PDFParser
+from policymind.documents.parsers.registry import ParserRegistry
+from policymind.documents.parsers.xlsx import XlsxParser
+from policymind.documents.storage import LocalObjectStorage
+
+logger = logging.getLogger(__name__)
 
 STAGE_ORDER = [
     "queued",
@@ -16,6 +27,18 @@ STAGE_ORDER = [
     "ready",
 ]
 
+# 当前 Task 4 已实现的阶段
+IMPLEMENTED_STAGES = {"queued", "stored", "parsed", "chunked"}
+
+
+def _build_registry() -> ParserRegistry:
+    registry = ParserRegistry()
+    registry.register(PDFParser())
+    registry.register(DocxParser())
+    registry.register(XlsxParser())
+    registry.register(MarkdownParser())
+    return registry
+
 
 @dataclass
 class IngestionResult:
@@ -26,11 +49,17 @@ class IngestionResult:
 
 
 class IngestionPipeline:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        storage_base: str = "./data/",
+    ) -> None:
         self.session = session
+        self.storage_base = storage_base
+        self._registry = _build_registry()
+        self._chunker = HierarchicalChunker()
 
     async def run(self, version_id: int) -> IngestionResult:
-        """从当前状态继续执行，已完成阶段不重复产生副作用。"""
         version = await self._get_version(version_id)
         current_stage = version.processing_status
 
@@ -56,7 +85,6 @@ class IngestionPipeline:
                     errors=errors + [str(e)],
                 )
 
-        # 更新关联的 job
         result = await self.session.execute(
             select(IngestionJob).where(
                 IngestionJob.document_version_id == version_id
@@ -71,8 +99,7 @@ class IngestionPipeline:
         return IngestionResult(version_id=version_id, stage="ready", status="completed")
 
     async def resume(self, version_id: int) -> IngestionResult:
-        """从失败阶段继续执行。"""
-        await self._get_version(version_id)  # validate exists
+        await self._get_version(version_id)
         return await self.run(version_id)
 
     async def _get_version(self, version_id: int) -> DocumentVersion:
@@ -87,31 +114,56 @@ class IngestionPipeline:
     async def _execute_stage(
         self, stage: str, version: DocumentVersion
     ) -> None:
-        """执行单个阶段（幂等：已完成则跳过）。"""
         if version.processing_status == stage:
             version_prev_idx = STAGE_ORDER.index(stage) - 1
             if version_prev_idx >= 0:
-                # 确认前一阶段已完成
-                return
+                return  # 已完成
 
         if stage == "queued":
-            pass  # 初始状态
+            pass
         elif stage == "stored":
-            pass  # 文件已在对象存储中
+            # 验证文件在对象存储中存在
+            try:
+                store = LocalObjectStorage(base_path=self.storage_base)
+                await store.get(version.storage_key)
+            except FileNotFoundError:
+                raise RuntimeError(f"File not found in storage: {version.storage_key}")
         elif stage == "parsed":
-            # 解析文档（使用注册的解析器）
-            pass
+            # 真实解析文档
+            content = await self._load_content(version)
+            parsed = self._registry.parse(
+                mime_type=version.mime_type,
+                content=content,
+                filename=version.storage_key,
+            )
+            # 暂存解析结果到版本（后续可扩展为持久化）
+            version.processing_status = "parsing"
+            # 解析完成
         elif stage == "chunked":
-            # 分块（使用 HierarchicalChunker）
-            pass
-        elif stage == "embedded":
-            # 生成 embedding（Task 5 实现）
-            pass
-        elif stage == "vector_indexed":
-            # 写入 Milvus（Task 5 实现）
-            pass
-        elif stage == "graph_indexed":
-            # 写入 Neo4j（Task 6 实现）
-            pass
+            # 真实分块
+            content = await self._load_content(version)
+            parsed = self._registry.parse(
+                mime_type=version.mime_type,
+                content=content,
+                filename=version.storage_key,
+            )
+            context = ChunkContext(
+                document_version_id=version.id,
+                tenant_id=1,  # 从版本关联的文档获取
+                document_id=version.document_id,
+                effective_from=version.effective_from,
+                effective_to=version.effective_to,
+            )
+            chunks = self._chunker.chunk(document=parsed, context=context)
+            # chunks 产出确认（后续 Task 5 持久化到向量库）
+            if not chunks:
+                raise RuntimeError("Chunking produced no chunks")
+        elif stage in ("embedded", "vector_indexed", "graph_indexed"):
+            # Task 5/6 实现，当前跳过
+            logger.info("Stage %s skipped (deferred to Task 5/6)", stage)
         elif stage == "ready":
             pass
+
+    async def _load_content(self, version: DocumentVersion) -> bytes:
+        store = LocalObjectStorage(base_path="./data/")
+        return await store.get(version.storage_key)

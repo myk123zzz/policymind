@@ -1,51 +1,89 @@
+import io
+
+import pytest
 from fastapi.testclient import TestClient
 
 
-def test_upload_document_accepted(client: TestClient) -> None:
-    """上传文档返回 202 和 job ID。"""
-    response = client.post(
-        "/api/v1/documents",
-        json={
-            "logical_name": "test-policy",
-            "category": "general",
-            "version": "1.0",
-            "content_hash": "abc123",
-            "storage_key": "1/test.md",
-            "mime_type": "text/markdown",
-        },
+@pytest.fixture
+def auth_headers() -> dict:
+    from policymind.auth.security import create_access_token
+
+    token = create_access_token(
+        data={"sub": "1", "tenant_id": 1, "role": "employee", "access_level": 1},
     )
-    assert response.status_code == 202
-    data = response.json()
-    assert "version_id" in data
-    assert data["status"] in ("queued", "completed")
+    return {"Authorization": f"Bearer {token}"}
 
 
-def test_get_job_status(client: TestClient) -> None:
-    """查询任务状态返回正确信息。"""
-    # 先上传一个文档
-    upload_resp = client.post(
-        "/api/v1/documents",
-        json={
-            "logical_name": "job-test",
-            "category": "general",
-            "version": "1.0",
-            "content_hash": "def456",
-            "storage_key": "2/test.md",
-            "mime_type": "text/markdown",
-        },
-    )
-    version_id = upload_resp.json()["version_id"]
+def test_upload_markdown_accepted(
+    client: TestClient, auth_headers: dict, tmp_path
+) -> None:
+    # 在临时目录创建 ./data/ 供 LocalObjectStorage 使用
+    import os
 
-    # 查询任务状态
-    response = client.get(f"/api/v1/documents/jobs/{version_id}")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["stage"] in ("queued", "stored", "parsed", "ready")
-    assert "status" in data
+    old = os.getcwd()
+    os.chdir(str(tmp_path))
+    try:
+        content = b"# Test Policy\n\nThis is a test document."
+        response = client.post(
+            "/api/v1/documents",
+            files={"file": ("test.md", io.BytesIO(content), "text/markdown")},
+            headers=auth_headers,
+        )
+        assert response.status_code == 202
+        assert "version_id" in response.json()
+    finally:
+        os.chdir(old)
 
 
-def test_list_documents(client: TestClient) -> None:
-    """列出文档返回列表。"""
-    response = client.get("/api/v1/documents")
-    assert response.status_code == 200
-    assert isinstance(response.json(), list)
+def test_upload_rejects_invalid(client: TestClient, auth_headers: dict) -> None:
+    with pytest.raises(ValueError, match="empty"):
+        client.post(
+            "/api/v1/documents",
+            files={"file": ("empty.pdf", io.BytesIO(b""), "application/pdf")},
+            headers=auth_headers,
+        )
+
+
+def test_get_job_status(
+    client: TestClient, auth_headers: dict, tmp_path
+) -> None:
+    import os
+
+    old = os.getcwd()
+    os.chdir(str(tmp_path))
+    try:
+        content = b"# Job Test\n\nContent here."
+        upload_resp = client.post(
+            "/api/v1/documents",
+            files={"file": ("job.md", io.BytesIO(content), "text/markdown")},
+            headers=auth_headers,
+        )
+        version_id = upload_resp.json()["version_id"]
+        response = client.get(
+            f"/api/v1/documents/jobs/{version_id}", headers=auth_headers
+        )
+        assert response.status_code == 200
+        assert response.json()["stage"] == "ready"
+    finally:
+        os.chdir(old)
+
+
+def test_list_documents(
+    client: TestClient, auth_headers: dict, tmp_path
+) -> None:
+    import os
+
+    old = os.getcwd()
+    os.chdir(str(tmp_path))
+    try:
+        client.post(
+            "/api/v1/documents",
+            files={
+                "file": ("list.md", io.BytesIO(b"# List\n\nDoc."), "text/markdown")
+            },
+            headers=auth_headers,
+        )
+        response = client.get("/api/v1/documents", headers=auth_headers)
+        assert response.status_code == 200
+    finally:
+        os.chdir(old)

@@ -1,6 +1,9 @@
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from policymind.core.config import get_settings
 from policymind.documents.pipeline import IngestionPipeline
 
 
@@ -29,15 +32,27 @@ class ArqJobRunner:
     async def enqueue(
         self, func: Callable[..., Awaitable[object]], *args: object
     ) -> str:
-        # Task 4 占位，完整 ARQ 集成在后续补
-        raise NotImplementedError("ARQ integration pending")
+        from arq import create_pool
+        from arq.connections import RedisSettings
+
+        redis = await create_pool(RedisSettings.from_dsn(self.redis_url))
+        job = await redis.enqueue_job(
+            "ingest_document_job", *args, _job_id=None
+        )
+        return job.job_id if job else "unknown"
 
 
 async def ingest_document_job(
-    session_factory: object,
+    ctx: dict[str, object],
     version_id: int,
 ) -> dict[str, object]:
-    """ARQ 入口：解析参数，调用 Pipeline。"""
-    pipeline = IngestionPipeline(session_factory)  # type: ignore[arg-type]
-    result = await pipeline.run(version_id)
-    return {"status": result.status, "stage": result.stage}
+    """ARQ 入口：从 ctx 创建 session，调用 Pipeline。"""
+    settings = get_settings()
+    engine = create_async_engine(settings.DATABASE_URL, echo=False)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with factory() as session:
+        pipeline = IngestionPipeline(session)
+        result = await pipeline.run(version_id)
+        await session.commit()
+        return {"status": result.status, "stage": result.stage}
