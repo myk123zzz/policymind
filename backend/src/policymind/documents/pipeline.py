@@ -5,29 +5,21 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from policymind.documents.chunking import HierarchicalChunker
-from policymind.documents.models import ChunkContext
-from policymind.documents.orm import DocumentVersion, IngestionJob
+from policymind.documents.models import ChunkContext, ParsedDocument
+from policymind.documents.orm import Document, DocumentVersion, IngestionJob
 from policymind.documents.parsers.docx import DocxParser
 from policymind.documents.parsers.markdown import MarkdownParser
 from policymind.documents.parsers.pdf import PDFParser
 from policymind.documents.parsers.registry import ParserRegistry
 from policymind.documents.parsers.xlsx import XlsxParser
-from policymind.documents.storage import LocalObjectStorage
+from policymind.documents.storage import LocalObjectStorage, ObjectStorage
 
 logger = logging.getLogger(__name__)
 
 STAGE_ORDER = [
-    "queued",
-    "stored",
-    "parsed",
-    "chunked",
-    "embedded",
-    "vector_indexed",
-    "graph_indexed",
-    "ready",
+    "queued", "stored", "parsed", "chunked",
+    "embedded", "vector_indexed", "graph_indexed", "ready",
 ]
-
-# 当前 Task 4 已实现的阶段
 IMPLEMENTED_STAGES = {"queued", "stored", "parsed", "chunked"}
 
 
@@ -52,10 +44,10 @@ class IngestionPipeline:
     def __init__(
         self,
         session: AsyncSession,
-        storage_base: str = "./data/",
+        storage: ObjectStorage | None = None,
     ) -> None:
         self.session = session
-        self.storage_base = storage_base
+        self._storage = storage or LocalObjectStorage(base_path="./data/")
         self._registry = _build_registry()
         self._chunker = HierarchicalChunker()
 
@@ -111,59 +103,52 @@ class IngestionPipeline:
             raise ValueError(f"DocumentVersion {version_id} not found")
         return version
 
+    async def _get_tenant_id(self, version: DocumentVersion) -> int:
+        result = await self.session.execute(
+            select(Document).where(Document.id == version.document_id)
+        )
+        doc = result.scalar_one_or_none()
+        return doc.tenant_id if doc else 1
+
     async def _execute_stage(
         self, stage: str, version: DocumentVersion
     ) -> None:
         if version.processing_status == stage:
             version_prev_idx = STAGE_ORDER.index(stage) - 1
             if version_prev_idx >= 0:
-                return  # 已完成
+                return
 
         if stage == "queued":
             pass
         elif stage == "stored":
-            # 验证文件在对象存储中存在
             try:
-                store = LocalObjectStorage(base_path=self.storage_base)
-                await store.get(version.storage_key)
+                await self._storage.get(version.storage_key)
             except FileNotFoundError:
                 raise RuntimeError(f"File not found in storage: {version.storage_key}")
         elif stage == "parsed":
-            # 真实解析文档
-            content = await self._load_content(version)
-            parsed = self._registry.parse(
-                mime_type=version.mime_type,
-                content=content,
-                filename=version.storage_key,
-            )
-            # 暂存解析结果到版本（后续可扩展为持久化）
-            version.processing_status = "parsing"
-            # 解析完成
+            _ = await self._load_and_parse(version)
         elif stage == "chunked":
-            # 真实分块
-            content = await self._load_content(version)
-            parsed = self._registry.parse(
-                mime_type=version.mime_type,
-                content=content,
-                filename=version.storage_key,
-            )
+            parsed = await self._load_and_parse(version)
+            tenant_id = await self._get_tenant_id(version)
             context = ChunkContext(
                 document_version_id=version.id,
-                tenant_id=1,  # 从版本关联的文档获取
+                tenant_id=tenant_id,
                 document_id=version.document_id,
                 effective_from=version.effective_from,
                 effective_to=version.effective_to,
             )
             chunks = self._chunker.chunk(document=parsed, context=context)
-            # chunks 产出确认（后续 Task 5 持久化到向量库）
             if not chunks:
                 raise RuntimeError("Chunking produced no chunks")
         elif stage in ("embedded", "vector_indexed", "graph_indexed"):
-            # Task 5/6 实现，当前跳过
             logger.info("Stage %s skipped (deferred to Task 5/6)", stage)
         elif stage == "ready":
             pass
 
-    async def _load_content(self, version: DocumentVersion) -> bytes:
-        store = LocalObjectStorage(base_path="./data/")
-        return await store.get(version.storage_key)
+    async def _load_and_parse(self, version: DocumentVersion) -> ParsedDocument:
+        content = await self._storage.get(version.storage_key)
+        return self._registry.parse(
+            mime_type=version.mime_type,
+            content=content,
+            filename=version.storage_key,
+        )

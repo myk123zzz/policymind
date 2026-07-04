@@ -1,6 +1,7 @@
+import hashlib
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, UploadFile
+from fastapi import APIRouter, Depends, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,10 +9,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from policymind.auth.dependencies import RequestContext, get_current_context
 from policymind.documents.orm import Document, DocumentVersion, IngestionJob
 from policymind.documents.pipeline import IngestionPipeline
+from policymind.documents.storage import LocalObjectStorage, ObjectStorage
 from policymind.documents.validation import safe_storage_key, validate_upload
 from policymind.infrastructure.postgres.session import get_db_session
 
 router = APIRouter(prefix="/api/v1/documents", tags=["documents"])
+
+
+def _get_storage(request: Request) -> ObjectStorage:
+    """从 app state 解析存储适配器；默认使用本地存储。"""
+    return getattr(request.app.state, "document_storage", None) or LocalObjectStorage(
+        base_path="./data/"
+    )
 
 
 class DocumentJobResponse(BaseModel):
@@ -26,11 +35,11 @@ async def create_document(
     file: UploadFile,
     ctx: RequestContext = Depends(get_current_context),
     session: AsyncSession = Depends(get_db_session),
+    storage: ObjectStorage = Depends(_get_storage),
 ) -> DocumentJobResponse:
     content = await file.read()
     filename = file.filename or "upload"
 
-    # 校验并确定 MIME
     validated = validate_upload(
         filename=filename,
         declared_mime=file.content_type or "application/octet-stream",
@@ -38,19 +47,12 @@ async def create_document(
         max_bytes=50 * 1024 * 1024,
     )
 
-    # 生成安全存储 Key 并写入存储
     ext = filename.rsplit(".", 1)[-1] if "." in filename else "bin"
     storage_key = safe_storage_key(ctx.tenant_id, suffix=f".{ext}")
-    from policymind.documents.storage import LocalObjectStorage
-
-    storage = LocalObjectStorage(base_path="./data/")
     await storage.put(key=storage_key, content=validated.content, content_type=validated.mime_type)
 
-    # 计算内容哈希
-    import hashlib
     content_hash = hashlib.sha256(validated.content).hexdigest()
 
-    # 创建文档记录
     doc = Document(
         tenant_id=ctx.tenant_id,
         logical_name=filename,
@@ -80,8 +82,7 @@ async def create_document(
     session.add(job)
     await session.flush()
 
-    # 同步执行摄取管道
-    pipeline = IngestionPipeline(session)
+    pipeline = IngestionPipeline(session, storage=storage)
     result = await pipeline.run(version.id)
 
     return DocumentJobResponse(

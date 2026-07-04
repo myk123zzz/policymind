@@ -6,8 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest_asyncio.fixture
-async def sample_doc(db_session: AsyncSession) -> int:
-    """创建文档版本记录（已完成 chunked），验证状态机逻辑。"""
+async def sample_doc(db_session: AsyncSession, tmp_path) -> int:
     from policymind.documents.orm import Document, DocumentVersion
 
     doc = Document(tenant_id=1, logical_name="test-policy", category="general")
@@ -28,25 +27,26 @@ async def sample_doc(db_session: AsyncSession) -> int:
     return version.id
 
 
-async def test_pipeline_completes_from_chunked(
+async def test_pipeline_completes(
     db_session: AsyncSession, sample_doc: int
 ) -> None:
-    """管道从 chunked 状态继续完成剩余阶段（跳过 embedded/indexed）。"""
     from policymind.documents.pipeline import IngestionPipeline
+    from policymind.documents.storage import LocalObjectStorage
 
-    pipeline = IngestionPipeline(db_session)
+    storage = LocalObjectStorage(base_path="./data/")
+    pipeline = IngestionPipeline(db_session, storage=storage)
     result = await pipeline.run(sample_doc)
 
     assert result.stage == "ready"
     assert result.status == "completed"
 
 
-async def test_pipeline_idempotent_resume(
+async def test_pipeline_resume(
     db_session: AsyncSession, sample_doc: int
 ) -> None:
-    """管道可从中断阶段恢复。"""
     from policymind.documents.orm import DocumentVersion
     from policymind.documents.pipeline import IngestionPipeline
+    from policymind.documents.storage import LocalObjectStorage
 
     result = await db_session.execute(
         select(DocumentVersion).where(DocumentVersion.id == sample_doc)
@@ -55,17 +55,18 @@ async def test_pipeline_idempotent_resume(
     version.processing_status = "embedded"
     await db_session.flush()
 
-    pipeline = IngestionPipeline(db_session)
+    storage = LocalObjectStorage(base_path="./data/")
+    pipeline = IngestionPipeline(db_session, storage=storage)
     result = await pipeline.run(sample_doc)
 
     assert result.stage == "ready"
 
 
-async def test_ingestion_job_status_tracked(
+async def test_job_tracked(
     db_session: AsyncSession, sample_doc: int
 ) -> None:
-    """任务状态可在 IngestionJob 中追踪。"""
     from policymind.documents.pipeline import IngestionJob, IngestionPipeline
+    from policymind.documents.storage import LocalObjectStorage
 
     job = IngestionJob(
         tenant_id=1,
@@ -76,7 +77,8 @@ async def test_ingestion_job_status_tracked(
     db_session.add(job)
     await db_session.flush()
 
-    pipeline = IngestionPipeline(db_session)
+    storage = LocalObjectStorage(base_path="./data/")
+    pipeline = IngestionPipeline(db_session, storage=storage)
     await pipeline.run(sample_doc)
 
     await db_session.refresh(job)
