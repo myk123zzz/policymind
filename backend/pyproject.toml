@@ -17,6 +17,7 @@ dependencies = [
     "filetype>=1.2",
     "minio>=7.2",
     "arq>=0.26",
+    "pymilvus>=2.4",
 ]
 
 [project.optional-dependencies]
