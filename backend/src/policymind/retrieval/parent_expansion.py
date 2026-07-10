@@ -19,6 +19,7 @@ def expand_parents(
     for hit in hits:
         parent_text = parent_map.get(hit.chunk_id, "")
         if parent_text:
+            # 保留原命中的全部元数据，仅扩展文本
             result.append(
                 SearchHit(
                     chunk_id=hit.chunk_id,
@@ -26,6 +27,11 @@ def expand_parents(
                     channel=hit.channel,
                     rank=hit.rank,
                     text=hit.text + "\n\n" + parent_text,
+                    parent_text=parent_text,
+                    document_name=hit.document_name,
+                    document_version=hit.document_version,
+                    page_number=hit.page_number,
+                    bbox=hit.bbox,
                 )
             )
         else:
