@@ -9,7 +9,7 @@ DIM = 128
 
 
 class MemoryVectorStore:
-    """内存向量存储，用于测试。支持租户/权限/时间过滤。"""
+    """内存向量存储，用于测试。支持租户/权限/时间过滤和双通道检索。"""
 
     def __init__(self) -> None:
         self._entries: list[dict[str, object]] = []
@@ -32,7 +32,8 @@ class MemoryVectorStore:
         at: datetime,
         limit_per_channel: int,
     ) -> HybridCandidates:
-        scored: list[tuple[float, object]] = []
+        # 过滤
+        candidates: list[tuple[object, list[float]]] = []
         for entry in self._entries:
             chunk = entry["chunk"]
             if getattr(chunk, "tenant_id", 0) != tenant_id:
@@ -45,12 +46,21 @@ class MemoryVectorStore:
                 continue
             if eff_to is not None and at > eff_to:
                 continue
+            candidates.append((chunk, entry["vector"]))  # type: ignore[arg-type]
 
-            vec = entry["vector"]
-            sim = self._cosine_sim(query_vector, vec)  # type: ignore[arg-type]
-            scored.append((sim, chunk))
+        # Dense: 余弦相似度
+        dense_scored = [(self._cosine_sim(query_vector, vec), c) for c, vec in candidates]
+        dense_scored.sort(key=lambda x: x[0], reverse=True)
 
-        scored.sort(key=lambda x: x[0], reverse=True)
+        # BM25: 基于 query_text 的关键词匹配分数
+        query_terms = set(query_text.lower().split())
+        bm25_scored: list[tuple[float, object]] = []
+        for c, _ in candidates:
+            text = getattr(c, "text", "").lower()
+            score = sum(1.0 for t in query_terms if t in text)
+            if score > 0:
+                bm25_scored.append((score, c))
+        bm25_scored.sort(key=lambda x: x[0], reverse=True)
 
         def to_hits(items: list[tuple[float, object]], channel: str) -> list[SearchHit]:
             return [
@@ -65,8 +75,8 @@ class MemoryVectorStore:
             ]
 
         return HybridCandidates(
-            dense=to_hits(scored[:limit_per_channel], "dense"),
-            bm25=to_hits(scored[:limit_per_channel], "bm25"),
+            dense=to_hits(dense_scored[:limit_per_channel], "dense"),
+            bm25=to_hits(bm25_scored[:limit_per_channel], "bm25"),
         )
 
     async def delete_document_version(
@@ -99,12 +109,7 @@ class MemoryVectorStore:
 
 
 class MilvusStore:
-    """Milvus 向量存储适配器，基于 pymilvus。
-
-    Schema 包含 Task 5 要求的全部检索与安全字段：
-    id, tenant_id, document_id, document_version_id, access_level,
-    effective_from, effective_to, text, dense_vector.
-    """
+    """Milvus 向量存储，支持 Dense ANN + BM25 双通道 Hybrid Search。"""
 
     def __init__(self, host: str = "localhost", port: int = 19530) -> None:
         self.host = host
@@ -117,6 +122,8 @@ class MilvusStore:
             CollectionSchema,
             DataType,
             FieldSchema,
+            Function,
+            FunctionType,
         )
 
         fields = [
@@ -127,10 +134,23 @@ class MilvusStore:
             FieldSchema(name="access_level", dtype=DataType.INT64),
             FieldSchema(name="effective_from", dtype=DataType.INT64),
             FieldSchema(name="effective_to", dtype=DataType.INT64),
-            FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=65535),
+            FieldSchema(
+                name="text", dtype=DataType.VARCHAR,
+                max_length=65535, enable_analyzer=True,
+            ),
             FieldSchema(name="dense_vector", dtype=DataType.FLOAT_VECTOR, dim=DIM),
+            FieldSchema(name="sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR),
         ]
-        return CollectionSchema(fields)
+
+        # BM25 Function: text → sparse_vector
+        bm25_fn = Function(
+            name="bm25",
+            function_type=FunctionType.BM25,
+            input_field_names=["text"],
+            output_field_names=["sparse_vector"],
+        )
+
+        return CollectionSchema(fields, functions=[bm25_fn])
 
     async def _ensure_ready(self) -> None:
         if self._ready:
@@ -147,9 +167,21 @@ class MilvusStore:
 
             if not utility.has_collection(COLLECTION_NAME, using=alias):
                 schema = self._make_schema()
-                Collection(name=COLLECTION_NAME, schema=schema, using=alias)
-            else:
-                Collection(name=COLLECTION_NAME, using=alias)
+                col = Collection(name=COLLECTION_NAME, schema=schema, using=alias)
+                # 为 dense 创建索引
+                col.create_index(
+                    field_name="dense_vector",
+                    index_params={
+                        "metric_type": "COSINE",
+                        "index_type": "IVF_FLAT",
+                        "params": {"nlist": 128},
+                    },
+                )
+                # 为 sparse 创建索引
+                col.create_index(
+                    field_name="sparse_vector",
+                    index_params={"metric_type": "BM25", "index_type": "SPARSE_INVERTED_INDEX"},
+                )
 
             self._alias: str = alias
             self._ready = True
@@ -165,7 +197,7 @@ class MilvusStore:
         from pymilvus import Collection
 
         col = Collection(name=COLLECTION_NAME, using=self._alias)
-        data: list[list[object]] = [[], [], [], [], [], [], [], [], []]
+        data: list[list[object]] = [[], [], [], [], [], [], [], [], [], []]
         for chunk, vec in zip(chunks, vectors):
             eff_from = getattr(chunk, "effective_from", None)
             eff_to = getattr(chunk, "effective_to", None)
@@ -178,6 +210,7 @@ class MilvusStore:
             data[6].append(int(eff_to.timestamp()) if eff_to else 0)
             data[7].append(getattr(chunk, "text", ""))
             data[8].append(vec)
+            data[9].append({})  # sparse_vector 由 BM25 Function 自动生成
         col.insert(data)
 
     async def hybrid_search(
@@ -191,7 +224,9 @@ class MilvusStore:
         limit_per_channel: int,
     ) -> HybridCandidates:
         await self._ensure_ready()
-        from pymilvus import Collection
+        from pymilvus import (
+            Collection,
+        )
 
         col = Collection(name=COLLECTION_NAME, using=self._alias)
         col.load()
@@ -203,29 +238,47 @@ class MilvusStore:
             f" && effective_from <= {at_ts}"
             f" && (effective_to == 0 || effective_to > {at_ts})"
         )
-        search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}}
-        results = col.search(
+
+        # 独立 dense 搜索
+        dense_param = {"metric_type": "COSINE", "params": {"nprobe": 10}}
+        dense_results = col.search(
             data=[query_vector],
             anns_field="dense_vector",
-            param=search_params,
+            param=dense_param,
             limit=limit_per_channel,
             expr=filter_expr,
-            output_fields=["id", "tenant_id", "text", "document_version_id"],
+            output_fields=["id", "text"],
         )
 
-        hits: list[SearchHit] = []
-        for i, match in enumerate(results[0]):
-            hits.append(
-                SearchHit(
-                    chunk_id=str(match.entity.get("id", "")),
-                    score=float(match.distance),
-                    channel="dense",
-                    rank=i + 1,
-                    text=str(match.entity.get("text", "")),
-                )
-            )
+        # 独立 sparse/BM25 搜索
+        from pymilvus import SparseSearchRequest
+        sparse_results = col.search(
+            data=[SparseSearchRequest(query_text=query_text)],
+            anns_field="sparse_vector",
+            param={"metric_type": "BM25"},
+            limit=limit_per_channel,
+            expr=filter_expr,
+            output_fields=["id", "text"],
+        )
 
-        return HybridCandidates(dense=hits, bm25=hits)
+        def _build_hits(results: object, channel: str) -> list[SearchHit]:
+            hits: list[SearchHit] = []
+            for i, match in enumerate(results[0]):  # type: ignore[index]
+                hits.append(
+                    SearchHit(
+                        chunk_id=str(match.entity.get("id", "")),
+                        score=float(match.distance),
+                        channel=channel,
+                        rank=i + 1,
+                        text=str(match.entity.get("text", "")),
+                    )
+                )
+            return hits
+
+        return HybridCandidates(
+            dense=_build_hits(dense_results, "dense"),
+            bm25=_build_hits(sparse_results, "bm25"),
+        )
 
     async def delete_document_version(
         self, tenant_id: int, version_id: int
