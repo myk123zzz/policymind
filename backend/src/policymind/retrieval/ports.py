@@ -11,6 +11,11 @@ class SearchHit:
     channel: str
     rank: int
     text: str = ""
+    parent_text: str = ""
+    document_name: str = ""
+    document_version: str = ""
+    page_number: int = 1
+    bbox: tuple[float, float, float, float] | None = None
 
 
 @dataclass(slots=True)

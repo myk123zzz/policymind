@@ -95,3 +95,19 @@ async def test_delete_by_version(store, vector, now) -> None:
     ids = {h.chunk_id for h in result.dense}
     assert "c1" in ids
     assert "c2" not in ids
+
+
+async def test_delete_respects_tenant_boundary(store, vector, now) -> None:
+    """相同 version_id 跨租户不会被误删。"""
+    c1 = FakeChunk(id="c1", text="t1-v1", tenant_id=1, document_version_id=10)
+    c2 = FakeChunk(id="c2", text="t2-v1", tenant_id=2, document_version_id=10)
+    await store.upsert(chunks=[c1, c2], vectors=[vector, vector])
+
+    await store.delete_document_version(tenant_id=1, version_id=10)
+
+    result = await store.hybrid_search(
+        query_text="test", query_vector=vector,
+        tenant_id=2, access_level=5, at=now, limit_per_channel=10,
+    )
+    ids = {h.chunk_id for h in result.dense}
+    assert "c2" in ids  # tenant 2 的记录未受影响

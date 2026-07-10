@@ -32,10 +32,12 @@ class RetrievalService:
         vector_store: VectorStore,
         embedder: EmbeddingProvider,
         reranker: Reranker | None = None,
+        parent_map: dict[str, str] | None = None,
     ) -> None:
         self._store = vector_store
         self._embedder = embedder
         self._reranker: Reranker = reranker or NoopReranker()
+        self._parent_map = parent_map or {}
 
     async def retrieve(
         self,
@@ -76,10 +78,10 @@ class RetrievalService:
             reranked = fused[:top_k]
             degraded = True
 
-        # Parent Expansion
-        expanded = expand_parents(reranked)
+        # Parent Expansion（使用注入的 parent_map）
+        expanded = expand_parents(reranked, parent_map=self._parent_map)
 
-        # Citation
+        # Citation（使用 SearchHit 中携带的元数据）
         citations = build_citations(expanded)
 
         return RetrievalBundle(

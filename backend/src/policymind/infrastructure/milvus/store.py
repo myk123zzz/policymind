@@ -86,7 +86,10 @@ class MemoryVectorStore:
         self._entries = [
             e
             for e in self._entries
-            if getattr(e["chunk"], "document_version_id", None) != version_id
+            if not (
+                getattr(e["chunk"], "tenant_id", None) == tenant_id
+                and getattr(e["chunk"], "document_version_id", None) == version_id
+            )
         ]
         return before - len(self._entries)
 
