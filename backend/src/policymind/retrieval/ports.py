@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
 
@@ -40,6 +41,7 @@ class VectorStore(Protocol):
         query_vector: list[float],
         tenant_id: int,
         access_level: int,
+        at: datetime,
         limit_per_channel: int,
     ) -> HybridCandidates: ...
 
