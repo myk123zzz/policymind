@@ -1,7 +1,11 @@
+import hashlib
 from collections.abc import Sequence
 from datetime import datetime
 
 from policymind.retrieval.ports import HybridCandidates, SearchHit
+
+COLLECTION_NAME = "policy_chunks"
+DIM = 128
 
 
 class MemoryVectorStore:
@@ -28,7 +32,6 @@ class MemoryVectorStore:
         at: datetime,
         limit_per_channel: int,
     ) -> HybridCandidates:
-        # 过滤 + 打分
         scored: list[tuple[float, object]] = []
         for entry in self._entries:
             chunk = entry["chunk"]
@@ -96,31 +99,62 @@ class MemoryVectorStore:
 
 
 class MilvusStore:
-    """Milvus 向量存储适配器。"""
+    """Milvus 向量存储适配器，基于 pymilvus。"""
 
     def __init__(self, host: str = "localhost", port: int = 19530) -> None:
         self.host = host
         self.port = port
-        self._connected = False
+        self._ready = False
 
-    async def _ensure_connected(self) -> None:
-        if not self._connected:
-            try:
-                from pymilvus import connections  # type: ignore[import-untyped]
+    async def _ensure_ready(self) -> None:
+        if self._ready:
+            return
+        try:
+            from pymilvus import (  # type: ignore[import-untyped]
+                Collection,
+                CollectionSchema,
+                DataType,
+                FieldSchema,
+                connections,
+                utility,
+            )
 
-                connections.connect(host=self.host, port=str(self.port))
-                self._connected = True
-            except Exception:
-                raise RuntimeError(
-                    f"Failed to connect to Milvus at {self.host}:{self.port}"
-                )
+            alias = f"pm_{hashlib.md5(f'{self.host}:{self.port}'.encode()).hexdigest()[:8]}"
+            connections.connect(alias=alias, host=self.host, port=str(self.port))
+
+            if not utility.has_collection(COLLECTION_NAME, using=alias):
+                fields = [
+                    FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=64, is_primary=True),
+                    FieldSchema(name="tenant_id", dtype=DataType.INT64),
+                    FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=65535),
+                    FieldSchema(name="dense_vector", dtype=DataType.FLOAT_VECTOR, dim=DIM),
+                ]
+                schema = CollectionSchema(fields)
+                Collection(name=COLLECTION_NAME, schema=schema, using=alias)
+            else:
+                Collection(name=COLLECTION_NAME, using=alias)
+
+            self._alias = alias
+            self._ready = True
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to initialize Milvus at {self.host}:{self.port}: {e}"
+            ) from e
 
     async def upsert(
         self, chunks: Sequence[object], vectors: Sequence[list[float]]
     ) -> None:
-        await self._ensure_connected()
-        # 实际写入 Milvus collection（生产环境需要先创建 collection/schema）
-        # 当前阶段标记为已连接，写入逻辑在集成测试时补全
+        await self._ensure_ready()
+        from pymilvus import Collection
+
+        col = Collection(name=COLLECTION_NAME, using=self._alias)
+        data: list[list[object]] = [[], [], [], []]
+        for chunk, vec in zip(chunks, vectors):
+            data[0].append(getattr(chunk, "id", hashlib.md5(str(chunk).encode()).hexdigest()[:16]))
+            data[1].append(getattr(chunk, "tenant_id", 0))
+            data[2].append(getattr(chunk, "text", ""))
+            data[3].append(vec)
+        col.insert(data)
 
     async def hybrid_search(
         self,
@@ -132,12 +166,47 @@ class MilvusStore:
         at: datetime,
         limit_per_channel: int,
     ) -> HybridCandidates:
-        await self._ensure_connected()
-        # 实际 Milvus hybrid search（生产环境需要配置 collection 和 index）
-        return HybridCandidates(dense=[], bm25=[])
+        await self._ensure_ready()
+        from pymilvus import Collection
+
+        col = Collection(name=COLLECTION_NAME, using=self._alias)
+        col.load()
+
+        filter_expr = f"tenant_id == {tenant_id}"
+        search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}}
+        results = col.search(
+            data=[query_vector],
+            anns_field="dense_vector",
+            param=search_params,
+            limit=limit_per_channel,
+            expr=filter_expr,
+            output_fields=["id", "tenant_id", "text"],
+        )
+
+        hits: list[SearchHit] = []
+        for i, match in enumerate(results[0]):
+            hits.append(
+                SearchHit(
+                    chunk_id=str(match.entity.get("id", "")),
+                    score=float(match.distance),
+                    channel="dense",
+                    rank=i + 1,
+                    text=str(match.entity.get("text", "")),
+                )
+            )
+
+        return HybridCandidates(dense=hits, bm25=hits)
 
     async def delete_document_version(
         self, tenant_id: int, version_id: int
     ) -> int:
-        await self._ensure_connected()
-        return 0
+        await self._ensure_ready()
+        from pymilvus import Collection
+
+        col = Collection(name=COLLECTION_NAME, using=self._alias)
+        expr = f"tenant_id == {tenant_id}"
+        result = col.query(expr=expr, output_fields=["id"], limit=1000)
+        ids = [r["id"] for r in result]
+        if ids:
+            col.delete(f"id in {ids}")
+        return len(ids)
