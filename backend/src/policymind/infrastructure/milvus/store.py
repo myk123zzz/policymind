@@ -99,22 +99,45 @@ class MemoryVectorStore:
 
 
 class MilvusStore:
-    """Milvus 向量存储适配器，基于 pymilvus。"""
+    """Milvus 向量存储适配器，基于 pymilvus。
+
+    Schema 包含 Task 5 要求的全部检索与安全字段：
+    id, tenant_id, document_id, document_version_id, access_level,
+    effective_from, effective_to, text, dense_vector.
+    """
 
     def __init__(self, host: str = "localhost", port: int = 19530) -> None:
         self.host = host
         self.port = port
         self._ready = False
 
+    @staticmethod
+    def _make_schema() -> object:
+        from pymilvus import (  # type: ignore[import-untyped]
+            CollectionSchema,
+            DataType,
+            FieldSchema,
+        )
+
+        fields = [
+            FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=64, is_primary=True),
+            FieldSchema(name="tenant_id", dtype=DataType.INT64),
+            FieldSchema(name="document_id", dtype=DataType.INT64),
+            FieldSchema(name="document_version_id", dtype=DataType.INT64),
+            FieldSchema(name="access_level", dtype=DataType.INT64),
+            FieldSchema(name="effective_from", dtype=DataType.INT64),
+            FieldSchema(name="effective_to", dtype=DataType.INT64),
+            FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=65535),
+            FieldSchema(name="dense_vector", dtype=DataType.FLOAT_VECTOR, dim=DIM),
+        ]
+        return CollectionSchema(fields)
+
     async def _ensure_ready(self) -> None:
         if self._ready:
             return
         try:
-            from pymilvus import (  # type: ignore[import-untyped]
+            from pymilvus import (
                 Collection,
-                CollectionSchema,
-                DataType,
-                FieldSchema,
                 connections,
                 utility,
             )
@@ -123,18 +146,12 @@ class MilvusStore:
             connections.connect(alias=alias, host=self.host, port=str(self.port))
 
             if not utility.has_collection(COLLECTION_NAME, using=alias):
-                fields = [
-                    FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=64, is_primary=True),
-                    FieldSchema(name="tenant_id", dtype=DataType.INT64),
-                    FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=65535),
-                    FieldSchema(name="dense_vector", dtype=DataType.FLOAT_VECTOR, dim=DIM),
-                ]
-                schema = CollectionSchema(fields)
+                schema = self._make_schema()
                 Collection(name=COLLECTION_NAME, schema=schema, using=alias)
             else:
                 Collection(name=COLLECTION_NAME, using=alias)
 
-            self._alias = alias
+            self._alias: str = alias
             self._ready = True
         except Exception as e:
             raise RuntimeError(
@@ -148,12 +165,19 @@ class MilvusStore:
         from pymilvus import Collection
 
         col = Collection(name=COLLECTION_NAME, using=self._alias)
-        data: list[list[object]] = [[], [], [], []]
+        data: list[list[object]] = [[], [], [], [], [], [], [], [], []]
         for chunk, vec in zip(chunks, vectors):
+            eff_from = getattr(chunk, "effective_from", None)
+            eff_to = getattr(chunk, "effective_to", None)
             data[0].append(getattr(chunk, "id", hashlib.md5(str(chunk).encode()).hexdigest()[:16]))
             data[1].append(getattr(chunk, "tenant_id", 0))
-            data[2].append(getattr(chunk, "text", ""))
-            data[3].append(vec)
+            data[2].append(getattr(chunk, "document_id", 0))
+            data[3].append(getattr(chunk, "document_version_id", 0))
+            data[4].append(getattr(chunk, "access_level", 1))
+            data[5].append(int(eff_from.timestamp()) if eff_from else 0)
+            data[6].append(int(eff_to.timestamp()) if eff_to else 0)
+            data[7].append(getattr(chunk, "text", ""))
+            data[8].append(vec)
         col.insert(data)
 
     async def hybrid_search(
@@ -172,7 +196,13 @@ class MilvusStore:
         col = Collection(name=COLLECTION_NAME, using=self._alias)
         col.load()
 
-        filter_expr = f"tenant_id == {tenant_id}"
+        at_ts = int(at.timestamp())
+        filter_expr = (
+            f"tenant_id == {tenant_id}"
+            f" && access_level <= {access_level}"
+            f" && effective_from <= {at_ts}"
+            f" && (effective_to == 0 || effective_to > {at_ts})"
+        )
         search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}}
         results = col.search(
             data=[query_vector],
@@ -180,7 +210,7 @@ class MilvusStore:
             param=search_params,
             limit=limit_per_channel,
             expr=filter_expr,
-            output_fields=["id", "tenant_id", "text"],
+            output_fields=["id", "tenant_id", "text", "document_version_id"],
         )
 
         hits: list[SearchHit] = []
@@ -204,9 +234,12 @@ class MilvusStore:
         from pymilvus import Collection
 
         col = Collection(name=COLLECTION_NAME, using=self._alias)
-        expr = f"tenant_id == {tenant_id}"
-        result = col.query(expr=expr, output_fields=["id"], limit=1000)
-        ids = [r["id"] for r in result]
-        if ids:
-            col.delete(f"id in {ids}")
-        return len(ids)
+        expr = f"tenant_id == {tenant_id} && document_version_id == {version_id}"
+        try:
+            result = col.query(expr=expr, output_fields=["id"], limit=10000)
+            ids = [r["id"] for r in result]
+            if ids:
+                col.delete(f"id in {ids}")
+            return len(ids)
+        except Exception:
+            return 0
