@@ -39,7 +39,10 @@ def run_stdio_server() -> None:
             elif method == "tools/call":
                 params = request.get("params", {})
                 tool_name = params.get("name", "")
-                arguments = params.get("arguments", {})
+                arguments = dict(params.get("arguments", {}))
+                # 将 approval_token 注入写工具参数
+                if "approval_token" in params:
+                    arguments["approval_token"] = params["approval_token"]
                 func = TOOLS.get(tool_name)
                 if func:
                     try:

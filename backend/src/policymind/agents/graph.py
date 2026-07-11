@@ -98,6 +98,21 @@ async def critic_node(state: AgentState) -> dict[str, object]:
 
 
 async def approval_node(state: AgentState) -> dict[str, object]:
+    """创建 ReviewTask 并中断，等待人工审批。"""
+    # 使用全局共享 checkpointer（由 runtime 注入）
+    chk = state.get("_checkpointer")
+    if chk and hasattr(chk, "create_review"):
+        review = await chk.create_review(
+            thread_id=state.get("thread_id", "unknown"),
+            reason="Approval required for write operation",
+            payload={"tool_name": "create_review_ticket"},
+        )
+        return {
+            "pending_review_id": review.id,
+            "observations": [
+                {"source": "approval", "content": f"Review {review.id}: Awaiting human review"}
+            ],
+        }
     return {
         "pending_review_id": 1,
         "observations": [{"source": "approval", "content": "Awaiting human review"}],
@@ -153,6 +168,7 @@ class PolicyAgentRuntime:
         """执行 Agent 图，直到 END 或 interrupt。"""
         current_node = start_node
         state["thread_id"] = thread_id
+        state["_checkpointer"] = self._checkpointer  # type: ignore[typeddict-unknown-key]
         max_steps = 20
 
         for _step in range(max_steps):
@@ -189,13 +205,19 @@ class PolicyAgentRuntime:
             return None
 
         if decision == "approve":
+            review_id = saved.get("pending_review_id", 0)
+            if review_id:
+                await self._checkpointer.approve_review(int(review_id))
             saved["pending_review_id"] = None
             saved["critique"] = {"verdict": "pass", "approved": True}
             saved["draft_answer"] = "Approved by reviewer. Task completed."
             saved["citation_ids"] = ["C1", "C2"]
+            # 恢复执行上次被中断的操作
             return await self.invoke(saved, thread_id, start_node="executor")
         else:
-            # Rejected: end the graph
+            review_id = saved.get("pending_review_id", 0)
+            if review_id:
+                await self._checkpointer.reject_review(int(review_id))
             saved["pending_review_id"] = None
             saved["critique"] = {"verdict": "pass", "rejected": True}
             await self._checkpointer.put_state(thread_id, saved)
