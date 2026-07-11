@@ -59,11 +59,14 @@ async def test_search_service_builds_context(repo) -> None:
     )
 
     svc = GraphSearchService(repo)
-    result = await svc.search(tenant_id=1, seed_entity_ids=["p1"], max_hops=2)
+    result = await svc.search(
+        tenant_id=1, query="procurement", seed_entity_ids=["p1"], max_hops=2,
+    )
 
     assert result.graph_used
     assert "Procurement" in result.context
     assert "Finance" in result.context
+    assert "source" in result.context.lower()
 
 
 async def test_search_service_no_seed_entities(repo) -> None:
@@ -74,3 +77,17 @@ async def test_search_service_no_seed_entities(repo) -> None:
 
     assert not result.graph_used
     assert result.skip_reason == "no seed entities"
+
+
+def test_search_ranks_by_query_match() -> None:
+    """rank_paths 对 query 匹配项加分。"""
+    p1 = GraphPath(
+        entities=[{"id": "a", "type": "Policy", "name": "Procurement Policy", "confidence": 0.9}],
+        relations=[],
+    )
+    p2 = GraphPath(
+        entities=[{"id": "b", "type": "Policy", "name": "Travel Rules", "confidence": 0.9}],
+        relations=[],
+    )
+    ranked = rank_paths([p1, p2], query="procurement")
+    assert ranked[0].entities[0]["id"] == "a"

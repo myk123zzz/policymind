@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from policymind.graph.path_ranker import rank_paths
 from policymind.graph.repository import GraphPath, GraphRepository
 
 
@@ -14,7 +15,7 @@ class GraphSearchResult:
 
 
 class GraphSearchService:
-    """Local Graph Search：Chunk → 种子实体 → 路径 → 排序 → 上下文。"""
+    """Local Graph Search：Chunk → 种子实体 → 路径 → 评分 → 带来源上下文。"""
 
     def __init__(self, repository: GraphRepository) -> None:
         self._repo = repository
@@ -23,6 +24,7 @@ class GraphSearchService:
         self,
         *,
         tenant_id: int,
+        query: str = "",
         seed_entity_ids: Sequence[str],
         max_hops: int = 2,
         limit: int = 10,
@@ -48,9 +50,12 @@ class GraphSearchService:
                 skip_reason="no paths found",
             )
 
-        context = self._build_context(paths)
+        # 路径评分排序
+        ranked = rank_paths(paths, query=query)[:limit]
+        context = self._build_context(ranked)
+
         return GraphSearchResult(
-            paths=paths,
+            paths=ranked,
             seed_entity_ids=list(seed_entity_ids),
             context=context,
         )
@@ -60,12 +65,18 @@ class GraphSearchService:
         lines: list[str] = []
         for i, path in enumerate(paths, 1):
             ents = " -> ".join(
-                f"{e.get('type', '?')}:{e.get('name', e.get('id', ''))}"
+                f"{str(e.get('type', '?'))}:{str(e.get('name', e.get('id', '')))}"
                 for e in path.entities
             )
-            rels = ", ".join(
-                f"{r.get('type', '?')}"
-                for r in path.relations
+            rels = ", ".join(str(r.get("type", "?")) for r in path.relations)
+            src_info = ""
+            for e in path.entities:
+                chunk = e.get("source_chunk_id", "")
+                ver = e.get("source_document_version_id", "")
+                if chunk:
+                    src_info += f"[chunk:{chunk}, ver:{ver}] "
+                break
+            lines.append(
+                f"Path {i} | entities: {ents} | relations: {rels} | sources: {src_info.strip()}"
             )
-            lines.append(f"Path {i}: {ents} | relations: {rels}")
         return "\n".join(lines)
