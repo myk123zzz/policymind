@@ -1,3 +1,5 @@
+import asyncio
+import json
 import logging
 from dataclasses import dataclass, field
 
@@ -18,52 +20,73 @@ class ToolObservation:
     error: str = ""
 
 
-class EnterpriseMCPClient:
-    """MCP Client：通过工具注册表调用 MCP 工具。"""
+class StdioMCPClient:
+    """通过 stdio transport 与独立 MCP server 进程通信。"""
 
-    def __init__(self) -> None:
-        self._tools: dict[str, object] = {}
+    def __init__(self, server_command: list[str]) -> None:
+        self._cmd = server_command
+        self._process: asyncio.subprocess.Process | None = None
+        self._request_id = 0
 
-    def register_tool(self, name: str, func: object) -> None:
-        self._tools[name] = func
+    async def connect(self) -> None:
+        self._process = await asyncio.create_subprocess_exec(
+            *self._cmd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+    async def disconnect(self) -> None:
+        if self._process and self._process.stdin:
+            self._process.stdin.close()
+            await self._process.wait()
+            self._process = None
+
+    async def _send_request(
+        self, method: str, params: dict[str, object] | None = None
+    ) -> dict[str, object]:
+        if not self._process or not self._process.stdin or not self._process.stdout:
+            raise RuntimeError("MCP client not connected")
+
+        self._request_id += 1
+        req = {"jsonrpc": "2.0", "id": self._request_id, "method": method, "params": params or {}}
+        line = json.dumps(req) + "\n"
+        self._process.stdin.write(line.encode())
+        await self._process.stdin.drain()
+
+        resp_line = await self._process.stdout.readline()
+        return json.loads(resp_line.decode())  # type: ignore[no-any-return]
 
     async def list_tools(self) -> list[MCPTool]:
-        return [
-            MCPTool(
-                name="get_employee_profile",
-                description="Get employee profile by ID",
-            ),
-            MCPTool(
-                name="get_approval_chain",
-                description="Get approval chain for a process",
-            ),
-            MCPTool(
-                name="list_required_materials",
-                description="List required materials for a process",
-            ),
-            MCPTool(
-                name="get_policy_version",
-                description="Get current effective policy version",
-            ),
-            MCPTool(
-                name="create_review_ticket",
-                description="Create a human review ticket (requires approval)",
-            ),
-        ]
-
-    async def call_tool(
-        self,
-        name: str,
-        arguments: dict[str, object],
-    ) -> ToolObservation:
-        try:
-            func = self._tools.get(name)
-            if not func:
-                return ToolObservation(
-                    tool_name=name, result={}, error=f"Tool {name} not found"
+        resp = await self._send_request("tools/list")
+        result = resp.get("result", {})
+        if not isinstance(result, dict):
+            return []
+        tools_data = result.get("tools", [])
+        result_list: list[MCPTool] = []
+        for t in tools_data:
+            if isinstance(t, dict):
+                result_list.append(
+                    MCPTool(name=str(t.get("name", "")), description=str(t.get("description", "")))
                 )
-            result = func(**arguments)  # type: ignore[operator]
-            out = result if isinstance(result, dict) else {"value": result}
-            return ToolObservation(tool_name=name, result=out)
+        return result_list
+
+    async def call_tool(self, name: str, arguments: dict[str, object]) -> ToolObservation:
+        try:
+            resp = await self._send_request("tools/call", {"name": name, "arguments": arguments})
+            if "error" in resp:
+                return ToolObservation(tool_name=name, result={}, error=str(resp["error"]))
+            result = resp.get("result", {})
+            if not isinstance(result, dict):
+                return ToolObservation(tool_name=name, result={}, error="invalid result")
+            content_list = result.get("content", [])
+            if isinstance(content_list, list) and content_list:
+                first = content_list[0]
+                if isinstance(first, dict):
+                    text = first.get("text", "{}")
+                    return ToolObservation(tool_name=name, result=json.loads(str(text)))
+            return ToolObservation(tool_name=name, result={})
+        except Exception as e:
+            return ToolObservation(tool_name=name, result={}, error=str(e))
         except Exception as e:
             return ToolObservation(tool_name=name, result={}, error=str(e))

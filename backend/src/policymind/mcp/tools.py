@@ -59,11 +59,17 @@ def create_review_ticket(
     evidence: str,
     conflict: str,
     suggested_reviewer: str,
-    approved: bool = False,
+    *,
+    approval_token: str | None = None,
 ) -> dict[str, object]:
-    """创建人工审核工单（需 HITL 批准）。"""
-    if not approved:
-        raise ValueError("Review ticket creation requires explicit approval")
+    """创建人工审核工单（需 HITL 批准，通过 ApprovalRequired 中断）。"""
+    from policymind.core.errors import ApprovalRequired
+
+    if not approval_token:
+        raise ApprovalRequired(
+            "Review ticket creation requires explicit HITL approval. "
+            f"Payload: {question[:80]}"
+        )
     return {
         "ticket_id": f"ticket-{uuid.uuid4().hex[:8]}",
         "status": "created",

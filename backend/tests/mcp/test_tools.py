@@ -38,15 +38,15 @@ def test_get_policy_version_returns_date() -> None:
 
 
 def test_create_review_ticket_requires_approval() -> None:
+    from policymind.core.errors import ApprovalRequired
     from policymind.mcp.tools import create_review_ticket
 
-    with pytest.raises(ValueError, match="approval"):
+    with pytest.raises(ApprovalRequired, match="approval"):
         create_review_ticket(
             question="Test?",
             evidence="Some evidence",
             conflict="None",
             suggested_reviewer="admin",
-            approved=False,
         )
 
 
@@ -58,7 +58,7 @@ def test_create_review_ticket_with_approval() -> None:
         evidence="Some evidence",
         conflict="None",
         suggested_reviewer="admin",
-        approved=True,
+        approval_token="approved-token-123",
     )
     assert result["status"] == "created"
     assert "ticket_id" in result
