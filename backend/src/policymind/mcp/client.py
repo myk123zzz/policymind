@@ -71,11 +71,30 @@ class StdioMCPClient:
                 )
         return result_list
 
-    async def call_tool(self, name: str, arguments: dict[str, object]) -> ToolObservation:
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, object],
+        approval_token: str | None = None,
+    ) -> ToolObservation:
+        params: dict[str, object] = {"name": name, "arguments": arguments}
+        if approval_token:
+            params["approval_token"] = approval_token
+
         try:
-            resp = await self._send_request("tools/call", {"name": name, "arguments": arguments})
+            resp = await self._send_request("tools/call", params)
             if "error" in resp:
-                return ToolObservation(tool_name=name, result={}, error=str(resp["error"]))
+                err = resp["error"]
+                err_data = err.get("data", {}) if isinstance(err, dict) else {}
+                requires_review = isinstance(err_data, dict) and err_data.get("requires_review")
+                err_msg = str(err.get("message", "")) if isinstance(err, dict) else str(err)
+                if requires_review:
+                    return ToolObservation(
+                        tool_name=name,
+                        result={"status": "review_required"},
+                        error=err_msg,
+                    )
+                return ToolObservation(tool_name=name, result={}, error=err_msg)
             result = resp.get("result", {})
             if not isinstance(result, dict):
                 return ToolObservation(tool_name=name, result={}, error="invalid result")

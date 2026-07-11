@@ -48,10 +48,18 @@ def run_stdio_server() -> None:
                             "jsonrpc": "2.0", "id": req_id,
                             "result": {"content": [{"type": "text", "text": json.dumps(result)}]},
                         }
-                    except ValueError as e:
+                    except Exception as e:
+                        code = -32001 if "Approval" in type(e).__name__ else -1
                         response = {
                             "jsonrpc": "2.0", "id": req_id,
-                            "error": {"code": -1, "message": str(e)},
+                            "error": {
+                                "code": code,
+                                "message": str(e),
+                                "data": {
+                                    "type": type(e).__name__,
+                                    "requires_review": code == -32001,
+                                },
+                            },
                         }
                 else:
                     response = {
