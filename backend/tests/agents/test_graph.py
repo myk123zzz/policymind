@@ -96,6 +96,32 @@ async def test_resume_reject() -> None:
     assert resumed.get("critique", {}).get("rejected")  # type: ignore[union-attr]
 
 
+async def test_resume_executes_pending_write() -> None:
+    """批准后 executor_node 真实执行被拦下的写操作。"""
+    runtime = build_policy_graph()
+    state: AgentState = {
+        "user_query": "approval review ticket for procurement",
+        "messages": [],
+        "citation_ids": [],
+        "tool_call_count": 0,
+        "retry_count": 0,
+    }
+    # invoke: supervisor → executor (注入 _pending_tool) → approval (HITL)
+    interrupted = await runtime.invoke(state, thread_id="test-write-1")
+    assert interrupted.get("pending_review_id") is not None
+    assert interrupted.get("_pending_tool") is not None
+    assert interrupted["_pending_tool"]["tool_name"] == "create_review_ticket"
+
+    # 批准恢复 → executor 真实执行 create_review_ticket
+    resumed = await runtime.resume(thread_id="test-write-1", decision="approve")
+    assert resumed is not None
+    # approved_tool consumed (只执行一次)
+    assert resumed.get("_approved_tool") is None
+    # 观测或 answer 中包含执行成功的痕迹
+    draft = resumed.get("draft_answer", "")
+    assert "Approved" in draft
+
+
 async def test_synthesizer_combines_observations() -> None:
     state: AgentState = {
         "user_query": "Test query",
