@@ -117,9 +117,17 @@ async def test_resume_executes_pending_write() -> None:
     assert resumed is not None
     # approved_tool consumed (只执行一次)
     assert resumed.get("_approved_tool") is None
+    assert resumed.get("_pending_tool") is None
+    assert resumed.get("pending_review_id") is None
     # 观测或 answer 中包含执行成功的痕迹
     draft = resumed.get("draft_answer", "")
-    assert "Approved" in draft
+    observations = resumed.get("observations", [])
+    assert any("Write op executed" in o.get("content", "") for o in observations)
+    assert "ticket-" in draft
+
+    resumed_again = await runtime.resume(thread_id="test-write-1", decision="approve")
+    assert resumed_again == resumed
+    assert resumed_again.get("pending_review_id") is None
 
 
 async def test_synthesizer_combines_observations() -> None:

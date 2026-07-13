@@ -30,7 +30,9 @@ def test_health_live(client: TestClient) -> None:
 def test_health_ready(client: TestClient) -> None:
     response = client.get("/health/ready")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    data = response.json()
+    assert data["status"] == "ok"
+    assert "dependencies" in data
 
 
 def test_create_app_returns_fastapi() -> None:

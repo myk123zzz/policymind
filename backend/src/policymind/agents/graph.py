@@ -83,6 +83,7 @@ async def executor_node(state: AgentState) -> dict[str, object]:
             "tool_call_count": tc + 1,
             "observations": [{"source": "executor", "content": f"Write op executed: {result}"}],
             "_approved_tool": None,
+            "_pending_tool": None,
         }
 
     # 写操作引导：注入待审批参数
@@ -247,9 +248,10 @@ class PolicyAgentRuntime:
 
         if decision == "approve":
             review_id = saved.get("pending_review_id", 0)
+            if not review_id:
+                return saved
             tool_payload = {}
-            if review_id:
-                await self._checkpointer.approve_review(int(review_id))
+            await self._checkpointer.approve_review(int(review_id))
             # 从 _pending_tool 获取待执行的写操作参数
             pending = saved.get("_pending_tool")
             if pending and isinstance(pending, dict):
@@ -263,8 +265,9 @@ class PolicyAgentRuntime:
             return await self.invoke(saved, thread_id, start_node="executor")
         else:
             review_id = saved.get("pending_review_id", 0)
-            if review_id:
-                await self._checkpointer.reject_review(int(review_id))
+            if not review_id:
+                return saved
+            await self._checkpointer.reject_review(int(review_id))
             saved["pending_review_id"] = None
             saved["critique"] = {"verdict": "pass", "rejected": True}
             await self._checkpointer.put_state(thread_id, saved)
