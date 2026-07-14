@@ -1,0 +1,87 @@
+# PolicyMind 完整部署（含应用服务）
+# 使用: docker compose -f deploy/compose.infrastructure.yml -f deploy/compose.full.yml up -d
+
+version: "3.8"
+
+services:
+  api:
+    build:
+      context: ../backend
+      dockerfile: ../deploy/docker/Dockerfile.api
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql+asyncpg://policymind:policymind@postgres:5432/policymind
+      REDIS_URL: redis://redis:6379/0
+      MILVUS_HOST: milvus
+      MILVUS_PORT: "19530"
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: changeme
+      S3_ENDPOINT: minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET: policymind-documents
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      LLM_BASE_URL: ${LLM_BASE_URL}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ../backend
+      dockerfile: ../deploy/docker/Dockerfile.worker
+    environment:
+      DATABASE_URL: postgresql+asyncpg://policymind:policymind@postgres:5432/policymind
+      REDIS_URL: redis://redis:6379/0
+      MILVUS_HOST: milvus
+      NEO4J_URI: bolt://neo4j:7687
+      S3_ENDPOINT: minio:9000
+    depends_on:
+      - redis
+      - postgres
+
+  mcp-server:
+    build:
+      context: ../backend
+      dockerfile: ../deploy/docker/Dockerfile.mcp
+    environment:
+      DATABASE_URL: postgresql+asyncpg://policymind:policymind@postgres:5432/policymind
+    ports:
+      - "8100:8100"
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: ../deploy/docker/Dockerfile.frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
