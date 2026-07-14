@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from policymind.agents.graph import PolicyAgentRuntime
 from policymind.api.v1.chat import router as chat_router
 from policymind.api.v1.graph import router as graph_router
 from policymind.api.v1.reviews import router as reviews_router
@@ -9,6 +10,7 @@ from policymind.core.config import Settings, get_settings
 from policymind.core.errors import PolicyMindError
 from policymind.core.logging import setup_logging
 from policymind.documents.router import router as documents_router
+from policymind.graph.repository import MemoryGraphRepository
 from policymind.infrastructure.postgres.session import (
     create_engine,
     create_session_factory,
@@ -29,6 +31,11 @@ def create_app(
     engine = create_engine(settings.DATABASE_URL)
     app.state.engine = engine
     app.state.session_factory = create_session_factory(engine)
+
+    # 共享 Agent runtime（Chat + Reviews + HITL 共享状态）
+    app.state.agent_runtime = PolicyAgentRuntime()
+    # 共享 Graph repository（Graph API 使用）
+    app.state.graph_repo = MemoryGraphRepository()
 
     # Mount all API routers
     app.include_router(auth_router)
