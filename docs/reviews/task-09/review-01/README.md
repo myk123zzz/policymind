@@ -3,10 +3,12 @@
 审查日期：2026-07-14
 
 审查范围：
-- `frontend/`
-- `docs/policymind/2026-07-01-policymind-implementation.md`
-- `docs/policymind/DEVELOPMENT_GUIDE.md`
-- `docs/reviews/task-08/review-02/README.md`
+- `frontend/package.json`
+- `frontend/src/{App.vue,main.ts,style.css}`
+- `frontend/src/stores/{auth,chat}.ts`
+- `frontend/src/router/index.ts`
+- `frontend/src/views/{LoginView,ChatView,DocumentsView,ReviewsView,GraphView}.vue`
+- `frontend/src/__tests__/router.spec.ts`
 
 审查基线：
 - [开发手册](/D:/policymind/docs/policymind/DEVELOPMENT_GUIDE.md:1)
@@ -17,130 +19,173 @@
 
 这轮我判断 **Task 9 暂不通过**。
 
-原因很直接：当前仓库里还没有 `frontend/` 目录，Task 9 要求的 Vue3 工作台还没有开始落地。
+先说好消息：Task 9 已经不是空白了。Vue3 + TypeScript + Vite 项目已经建起来，登录页、文档页、聊天页、审核页、图谱页和基础 store/router 都有了，`typecheck/test/build` 也能跑通。
 
-按简历项目口径，不需要第一轮就做成完整生产级前端，但至少需要一个可运行的 Vue3/Vite 工作台，能演示：
+但按简历项目的前端演示标准，现在还差几个会被一眼看出来的闭环：
 
-1. 登录守卫。
-2. 三栏问答界面。
-3. fetch POST 方式消费 SSE，不使用重复 `EventSource`。
-4. 引用、Graph Path、Review 状态的基础展示。
-5. HITL 审核批准/拒绝操作。
-6. Markdown 使用 DOMPurify 清洗。
+1. Markdown/DOMPurify 依赖装了，但没有实际用于渲染 LLM Markdown，XSS 测试也没有。
+2. SSE 解析没有保留事件类型，也没有真正把事件归并到 `events` 时间线。
+3. 审核中心的 approve 只调用 `/reviews/{id}/approve`，没有继续恢复对应 chat thread，和 Task 8 的 HITL resume 主线没有接起来。
+4. 当前界面还不是“三栏问答工作台”，引用/Graph Path/Review 状态没有形成一个可演示的工作台布局。
+5. 测试只有 auth store 的 3 个基础用例，没有覆盖 Task 9 要求的登录守卫、SSE 归并、引用点击、审核操作和 Markdown XSS。
 
-现在这些文件和测试都不存在，所以不能进入 Task 10。
+所以当前可以算 **Task 9 的前端骨架已完成**，但还不能收口进入 Task 10。
+
+## 做得不错的部分
+
+- 已创建 `frontend/package.json`，包含 Vue3、Pinia、Vue Router、Vite、Vitest、DOMPurify、marked。
+- 已创建 `LoginView`、`ChatView`、`DocumentsView`、`ReviewsView`、`GraphView`。
+- `auth` store 能登录、保存 token、退出。
+- 路由守卫已经按 `meta.requiresAuth` 拦截未登录访问。
+- `chat` store 使用 `fetch` POST 调 `/api/v1/chat/stream`，没有创建 `EventSource`。
+- 前端门禁通过：
+  - `npm run typecheck`
+  - `npm test -- --run`
+  - `npm run build`
 
 ## Findings
 
-### 1. `frontend/` 工作台目录不存在
+### 1. Markdown/DOMPurify 没有接入，XSS 验收点缺失
 
 - 严重性：高
 - 位置：
-  - [docs/policymind/2026-07-01-policymind-implementation.md](/D:/policymind/docs/policymind/2026-07-01-policymind-implementation.md:247)
-  - 仓库根目录：未发现 `frontend/`
+  - [frontend/package.json](/D:/policymind/frontend/package.json:17)
+  - [frontend/package.json](/D:/policymind/frontend/package.json:18)
+  - [frontend/src/views/ChatView.vue](/D:/policymind/frontend/src/views/ChatView.vue:28)
+  - [docs/policymind/2026-07-01-policymind-implementation.md](/D:/policymind/docs/policymind/2026-07-01-policymind-implementation.md:261)
+  - [docs/policymind/DEVELOPMENT_GUIDE.md](/D:/policymind/docs/policymind/DEVELOPMENT_GUIDE.md:862)
 
-Task 9 明确要求创建：
-
-- `frontend/package.json`
-- `frontend/src/api/`
-- `frontend/src/stores/`
-- `frontend/src/router/`
-- `frontend/src/views/`
-- `frontend/src/components/`
-- `frontend/src/**/*.spec.ts`
-
-当前这些都不存在。
+`dompurify` 和 `marked` 已安装，但当前聊天消息使用 `{{ msg.content }}` 纯文本渲染。纯文本不会触发 XSS，但也没有满足“Markdown 使用 DOMPurify”的要求，引用、列表、表格等回答格式也展示不出来。
 
 改进方向：
-- 初始化 Vue3 + TypeScript + Vite 项目。
-- 建立 Pinia、Vue Router、Vitest 基础配置。
-- 至少补一个可运行的 app shell，而不是只放空目录。
+- 增加 `src/utils/markdown.ts`，实现 `renderSafeMarkdown(source)`。
+- Chat 消息用 `v-html="renderSafeMarkdown(msg.content)"` 渲染。
+- 补测试：输入 `<script>alert(1)</script> **ok**`，输出不含 script，保留安全 markdown HTML。
 
-### 2. Task 9 核心交互还没有实现
+### 2. SSE 事件归并不完整，事件类型丢失
 
 - 严重性：高
 - 位置：
+  - [frontend/src/stores/chat.ts](/D:/policymind/frontend/src/stores/chat.ts:28)
+  - [frontend/src/stores/chat.ts](/D:/policymind/frontend/src/stores/chat.ts:55)
+  - [frontend/src/stores/chat.ts](/D:/policymind/frontend/src/stores/chat.ts:67)
   - [docs/policymind/2026-07-01-policymind-implementation.md](/D:/policymind/docs/policymind/2026-07-01-policymind-implementation.md:259)
-  - [docs/policymind/DEVELOPMENT_GUIDE.md](/D:/policymind/docs/policymind/DEVELOPMENT_GUIDE.md:850)
 
-Task 9 的演示价值在前端闭环：
+当前 parser 看到 `event: ` 时只是把这一行重新塞回 `buffer`，真正处理 `data: ` 时传入的事件类型固定是空字符串。`events` ref 也没有 push。
 
-- 登录后进入工作台。
-- 左侧文档/会话，中间问答，右侧引用/图谱/审核。
-- `/api/v1/chat/stream` 通过 fetch POST 读取 ReadableStream。
-- `review_required` 出现后能展示审核卡片。
-- 用户批准后调用 `/api/v1/chat/{thread_id}/resume` 并显示恢复结果。
+这会导致：
 
-当前没有任何前端代码能承接 Task 8 已经收口的 API。
+- 前端无法展示 routing / retrieval / graph_path / review_required / done 时间线。
+- 后续引用点击、Graph Path 展示、Review 状态很难从事件流中恢复。
+- 测试里也没有覆盖“多条 SSE 事件归并”。
 
 改进方向：
-- 实现 `src/api/client.ts`：token 注入、错误处理。
-- 实现 `src/api/streamChat.ts`：仅使用 fetch POST 读取 SSE。
-- 实现 `src/stores/auth.ts` 和 `src/stores/chat.ts`。
-- 实现 `LoginView`、`WorkspaceView`、`DocumentsView`、`GraphView`、`ReviewsView`。
+- 把 SSE parser 改成按空行切分 event block。
+- 解析 `event:` 和 `data:`，写入 `events.value`。
+- 针对 `content`、`citation`、`graph_path`、`review_required`、`done` 分别更新状态。
+- 补 `chat.spec.ts`，mock ReadableStream，验证事件归并。
 
-### 3. 前端安全测试尚未建立
+### 3. Review 页面没有接上 chat resume 主线
+
+- 严重性：高
+- 位置：
+  - [frontend/src/views/ReviewsView.vue](/D:/policymind/frontend/src/views/ReviewsView.vue:14)
+  - [frontend/src/views/ReviewsView.vue](/D:/policymind/frontend/src/views/ReviewsView.vue:20)
+  - [frontend/src/stores/chat.ts](/D:/policymind/frontend/src/stores/chat.ts:78)
+
+`ChatView` 里的 pending review 可以调用 `chat.resume()`，但 `ReviewsView` 只调用 `/api/v1/reviews/{id}/approve`，没有用 review 的 `thread_id` 去调用 `/api/v1/chat/{thread_id}/resume`。
+
+这意味着从“审核中心”批准后，对话不会自动恢复，和 Task 8 刚收口的 API 演示链路没有完全接上。
+
+改进方向：
+- Review item 类型加入 `thread_id`。
+- 审核中心 approve 后调用 chat resume 或统一封装 `approveAndResume(review)`。
+- 补测试：点击 approve 后应调用 `/reviews/{id}/approve` 和 `/chat/{thread_id}/resume`，并刷新列表。
+
+### 4. 工作台布局和引用/Graph Path 展示还不够
 
 - 严重性：中
 - 位置：
-  - [docs/policymind/2026-07-01-policymind-implementation.md](/D:/policymind/docs/policymind/2026-07-01-policymind-implementation.md:259)
+  - [frontend/src/views/ChatView.vue](/D:/policymind/frontend/src/views/ChatView.vue:26)
+  - [frontend/src/stores/chat.ts](/D:/policymind/frontend/src/stores/chat.ts:17)
+  - [docs/policymind/2026-07-01-policymind-implementation.md](/D:/policymind/docs/policymind/2026-07-01-policymind-implementation.md:260)
 
-Task 9 要求先测试：
+Task 9 要求“三栏问答、文档/版本、图谱、审核、评测和设置页面”。现在有多个页面，但 Chat 不是三栏工作台：
 
-- 登录守卫。
-- SSE 事件归并。
-- 引用点击。
-- 审核操作。
-- Markdown XSS。
+- 没有左侧会话/文档栏。
+- 没有右侧引用、Graph Path、Review 时间线。
+- `citations` 只有 id，没有点击行为。
+- `graph_path` 事件没有落入 UI。
+- 没有评测和设置页面。
 
-当前没有 `frontend/src/**/*.spec.ts`，也没有 Vitest 配置。
+按简历项目口径，评测页可等 Task 10，但 Chat 工作台至少应该能把引用、图谱路径和审核状态摆出来。
 
 改进方向：
-- 用 Vitest + Vue Test Utils 建立最小测试。
-- 至少覆盖：
-  - 未登录访问工作台跳转登录。
-  - `streamChat()` 能归并 `routing/content/review_required/done`。
-  - Markdown 中 `<script>` 被 DOMPurify 清掉。
-  - 点击 approve 会调用 resume API。
+- ChatView 改成三栏：左侧会话/文档，中间问答，右侧 citations / graph paths / review。
+- citation id 可点击并高亮或展示原文。
+- graph_path 事件进入右侧面板。
+
+### 5. 测试覆盖不符合 Task 9 要求
+
+- 严重性：中
+- 位置：
+  - [frontend/src/__tests__/router.spec.ts](/D:/policymind/frontend/src/__tests__/router.spec.ts:1)
+  - [docs/policymind/2026-07-01-policymind-implementation.md](/D:/policymind/docs/policymind/2026-07-01-policymind-implementation.md:259)
+
+当前测试文件名叫 `router.spec.ts`，但内容只测 auth store：
+
+- starts unauthenticated
+- sets token
+- logout clears token
+
+缺少 Task 9 明确要求的：
+
+- 登录守卫测试。
+- SSE 事件归并测试。
+- 引用点击测试。
+- 审核操作测试。
+- Markdown XSS 测试。
+
+改进方向：
+- 增加 `router.spec.ts` 真正测试未登录跳转。
+- 增加 `chat-store.spec.ts` 测 SSE 归并。
+- 增加 `markdown.spec.ts` 测 DOMPurify。
+- 增加 `reviews.spec.ts` 测 approve/resume。
 
 ## 可先忽略的问题
 
-这些不建议在第一轮 Task 9 阻塞：
+这些不建议在第一轮继续卡：
 
-- Playwright E2E 可以晚一点补。
-- 评测页面可以先放一个占位页，等 Task 10 后接真实数据。
-- 图谱可视化可以先用列表或简单 SVG/HTML 表示，不必第一轮就接 Cytoscape。
-- 设计细节可以先保持简洁，但必须能跑通核心操作。
+- `HelloWorld.vue`、Vite/Vue 默认资源还没清理，后面整理 UI 时顺手删。
+- 评测页面可以等 Task 10 后再接真实数据。
+- 图谱可以先用列表或计数展示，不必第一轮就做复杂可视化。
+- 视觉设计目前偏脚手架风格，但先把工作流打通更重要。
 
 ## 验证记录
 
-实际检查：
+实际执行：
 
-1. `Test-Path frontend`
-   - 结果：`False`
+1. `npm run typecheck`
+   - 结果：通过
 
-2. `rg --files frontend`
-   - 结果：没有文件
+2. `npm test -- --run`
+   - 结果：通过
+   - 摘要：`1 passed (1)`，`3 passed`
 
-3. 未执行前端门禁：
-   - `npm run typecheck`
-   - `npm test -- --run`
-   - `npm run build`
-
-原因：当前没有 `frontend/package.json`，前端项目尚未初始化。
+3. `npm run build`
+   - 结果：通过
+   - 摘要：Vite build 成功，生成 `dist`
 
 ## 是否允许进入下一 Task
 
-**不允许进入 Task 10。**
+**暂不建议进入 Task 10。**
 
-建议先补一个最小可演示前端：
+建议先补一轮小闭环：
 
-1. 初始化 Vue3 + TypeScript + Vite。
-2. 做登录页和路由守卫。
-3. 做三栏问答工作台。
-4. 用 fetch POST 接 `/api/v1/chat/stream`。
-5. 展示 `review_required` 并调用 resume。
-6. Markdown 用 DOMPurify。
-7. 补 Vitest 测试和 `typecheck/test/build` 门禁。
+1. 接入 `renderSafeMarkdown()`，用 DOMPurify 清洗 Markdown。
+2. 重写 SSE parser，保留事件类型并归并到 timeline。
+3. ChatView 做成简洁三栏：会话/问答/引用与审核。
+4. ReviewsView 批准后能 resume 对应 thread。
+5. 补登录守卫、SSE、Markdown XSS、审核操作测试。
 
-这几项完成后，Task 9 就可以按简历项目标准复审收口。
+补完这几项后，Task 9 就可以按简历项目标准收口。
