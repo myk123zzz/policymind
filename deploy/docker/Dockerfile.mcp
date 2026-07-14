@@ -6,4 +6,4 @@ COPY src/ src/
 
 RUN pip install uv && uv sync --no-dev
 EXPOSE 8100
-CMD ["uv", "run", "python", "-m", "policymind.mcp.server"]
+CMD ["uv", "run", "python", "-c", "from policymind.mcp.server import run_stdio_server; run_stdio_server()"]

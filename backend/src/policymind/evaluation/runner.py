@@ -103,29 +103,35 @@ class EvaluationRunner:
                 result.actual_answer, case.required_facts
             )
 
-            # Citation precision: from agent citation_ids vs answer references
+            # Citation precision: from agent citation_ids
             agent_cids = set(agent_result.get("citation_ids", []))
-            if agent_cids:
-                result.citation_precision = citation_precision(
-                    agent_cids, agent_cids
+            case_versions = set(case.expected_document_versions)
+            if agent_cids and case_versions:
+                valid_ids = {f"C{v}" for v in case_versions}
+                result.citation_precision = citation_precision(agent_cids, valid_ids)
+
+            # Graph path accuracy: only on cases with expected edges
+            if case.expected_graph_edges:
+                obs = agent_result.get("observations", [])
+                graph_refs = [
+                    str(o.get("content", "")) for o in obs
+                    if o.get("source") == "graph_search"
+                ]
+                result.graph_path_accuracy = graph_path_accuracy(
+                    graph_refs, case.expected_graph_edges
                 )
+            else:
+                result.graph_path_accuracy = -1.0  # not applicable
 
-            # Graph path accuracy: from observations vs expected edges
-            obs = agent_result.get("observations", [])
-            graph_refs = [
-                str(o.get("content", "")) for o in obs
-                if o.get("source") == "graph_search"
-            ]
-            result.graph_path_accuracy = graph_path_accuracy(
-                graph_refs, case.expected_graph_edges
-            )
-
-            # MRR: from retrieval_ref vs expected versions
-            mrr_list: list[str] = [str(agent_result.get("retrieval_ref", ""))]
-            result.mrr = reciprocal_rank(
-                [x for x in mrr_list if x],
-                set(case.expected_document_versions),
-            )
+            # MRR: from retrieved chunk references vs expected versions
+            retrieved_ids: list[str] = []
+            for o in agent_result.get("observations", []):
+                if o.get("source") == "retrieval":
+                    retrieved_ids.append(str(o.get("content", "")))
+            if retrieved_ids and case_versions:
+                result.mrr = reciprocal_rank(retrieved_ids, case_versions)
+            else:
+                result.mrr = -1.0  # not applicable
 
             # Refusal check
             if case.should_refuse:
@@ -167,6 +173,10 @@ class EvaluationRunner:
             1 for r in results if r.refusal_correct and r.refusal_correct is not None
         )
 
+        valid_cite = [r.citation_precision for r in results if r.citation_precision >= 0]
+        valid_graph = [r.graph_path_accuracy for r in results if r.graph_path_accuracy >= 0]
+        valid_mrr = [r.mrr for r in results if r.mrr >= 0]
+
         return EvaluationReport(
             dataset_version=f"golden_v1 ({dataset_hash})",
             total_cases=total,
@@ -178,12 +188,12 @@ class EvaluationRunner:
             routing_accuracy=routing_correct / total if total > 0 else 0.0,
             fact_coverage=sum(r.fact_coverage for r in results) / total if total > 0 else 0.0,
             citation_precision=(
-                sum(r.citation_precision for r in results) / total if total > 0 else 0.0
+                sum(valid_cite) / len(valid_cite) if valid_cite else 0.0
             ),
             graph_path_accuracy=(
-                sum(r.graph_path_accuracy for r in results) / total if total > 0 else 0.0
+                sum(valid_graph) / len(valid_graph) if valid_graph else 0.0
             ),
-            mrr=sum(r.mrr for r in results) / total if total > 0 else 0.0,
+            mrr=sum(valid_mrr) / len(valid_mrr) if valid_mrr else 0.0,
             refusal_accuracy=refusal_correct_count / refusal_total if refusal_total > 0 else 1.0,
             avg_latency_ms=sum(r.latency_ms for r in results) / total if total > 0 else 0.0,
             case_results=results,

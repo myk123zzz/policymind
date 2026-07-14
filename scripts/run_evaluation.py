@@ -64,6 +64,7 @@ async def main() -> None:
                 "mrr": report.mrr,
                 "refusal_accuracy": report.refusal_accuracy,
                 "avg_latency_ms": report.avg_latency_ms,
+                "model_config": report.model_config,
                 "case_results": [
                     {
                         "case_id": r.case_id,

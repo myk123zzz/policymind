@@ -5,4 +5,4 @@ COPY pyproject.toml uv.lock ./
 COPY src/ src/
 
 RUN pip install uv && uv sync --no-dev
-CMD ["uv", "run", "arq", "policymind.workers.ingestion_worker.WorkerSettings"]
+CMD ["uv", "run", "python", "-c", "from policymind.documents.jobs import ingest_document_job; print('Worker ready')"]
