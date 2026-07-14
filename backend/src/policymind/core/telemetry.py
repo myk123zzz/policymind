@@ -1,10 +1,14 @@
-"""OpenTelemetry 遥测 + Prometheus 指标暴露。"""
+"""遥测收集器 + Prometheus /metrics 端点。"""
 
 import logging
 import time
 from dataclasses import dataclass, field
 
+from fastapi import APIRouter, Response
+
 logger = logging.getLogger(__name__)
+
+router = APIRouter(tags=["metrics"])
 
 
 @dataclass
@@ -24,7 +28,7 @@ class Telemetry:
 
     def __init__(self) -> None:
         self._spans: list[dict[str, object]] = []
-        self._metrics: dict[str, list[float]] = {}
+        self._counters: dict[str, int] = {}
 
     def start_span(self, name: str, **attrs: str) -> TelemetrySpan:
         return TelemetrySpan(name=name, attributes=dict(attrs))
@@ -37,26 +41,29 @@ class Telemetry:
             "attributes": span.attributes,
         })
 
-    def record_metric(self, name: str, value: float) -> None:
-        if name not in self._metrics:
-            self._metrics[name] = []
-        self._metrics[name].append(value)
+    def increment(self, name: str) -> None:
+        self._counters[name] = self._counters.get(name, 0) + 1
 
-    def get_metrics(self) -> dict[str, dict[str, float]]:
-        result: dict[str, dict[str, float]] = {}
-        for name, values in self._metrics.items():
-            if values:
-                result[name] = {
-                    "count": len(values),
-                    "avg": round(sum(values) / len(values), 4),
-                    "min": round(min(values), 4),
-                    "max": round(max(values), 4),
-                }
-        return result
-
-    def get_spans(self) -> list[dict[str, object]]:
-        return self._spans
+    def get_metrics_text(self) -> str:
+        """生成 Prometheus text format。"""
+        lines: list[str] = []
+        for name, val in self._counters.items():
+            safe_name = name.replace("-", "_").replace(" ", "_")
+            lines.append(f"# HELP {safe_name} PolicyMind metric")
+            lines.append(f"# TYPE {safe_name} counter")
+            lines.append(f"{safe_name} {val}")
+        lines.append(f"spans_total {len(self._spans)}")
+        return "\n".join(lines) + "\n"
 
 
 # 全局实例
 telemetry = Telemetry()
+
+
+@router.get("/metrics")
+async def metrics_endpoint() -> Response:
+    """Prometheus /metrics 端点。"""
+    return Response(
+        content=telemetry.get_metrics_text(),
+        media_type="text/plain; version=0.0.4",
+    )

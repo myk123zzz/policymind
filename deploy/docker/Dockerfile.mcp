@@ -1,0 +1,9 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+COPY src/ src/
+
+RUN pip install uv && uv sync --no-dev
+EXPOSE 8100
+CMD ["uv", "run", "python", "-m", "policymind.mcp.server"]

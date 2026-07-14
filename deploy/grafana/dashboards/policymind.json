@@ -1,0 +1,15 @@
+{
+  "title": "PolicyMind Overview",
+  "panels": [
+    {
+      "title": "Request Count",
+      "type": "stat",
+      "targets": [{"expr": "request_count"}]
+    },
+    {
+      "title": "Avg Latency",
+      "type": "gauge",
+      "targets": [{"expr": "request_latency_avg"}]
+    }
+  ]
+}

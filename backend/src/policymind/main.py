@@ -9,6 +9,7 @@ from policymind.auth.router import router as auth_router
 from policymind.core.config import Settings, get_settings
 from policymind.core.errors import PolicyMindError
 from policymind.core.logging import setup_logging
+from policymind.core.telemetry import router as metrics_router
 from policymind.documents.router import router as documents_router
 from policymind.graph.repository import MemoryGraphRepository
 from policymind.infrastructure.postgres.session import (
@@ -43,6 +44,7 @@ def create_app(
     app.include_router(chat_router)
     app.include_router(reviews_router)
     app.include_router(graph_router)
+    app.include_router(metrics_router)
 
     @app.get("/health/live")
     async def health_live() -> dict[str, str]:

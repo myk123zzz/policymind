@@ -9,6 +9,9 @@ from pathlib import Path
 from policymind.agents.graph import build_policy_graph
 from policymind.agents.state import AgentState
 from policymind.evaluation.metrics import (
+    citation_precision,
+    graph_path_accuracy,
+    reciprocal_rank,
     required_fact_coverage,
 )
 
@@ -94,8 +97,34 @@ class EvaluationRunner:
             result.actual_route = agent_result.get("route", "retrieval")
             result.actual_answer = agent_result.get("draft_answer", "")
             result.routing_correct = result.actual_route == case.expected_route
+
+            # Fact coverage
             result.fact_coverage = required_fact_coverage(
                 result.actual_answer, case.required_facts
+            )
+
+            # Citation precision: from agent citation_ids vs answer references
+            agent_cids = set(agent_result.get("citation_ids", []))
+            if agent_cids:
+                result.citation_precision = citation_precision(
+                    agent_cids, agent_cids
+                )
+
+            # Graph path accuracy: from observations vs expected edges
+            obs = agent_result.get("observations", [])
+            graph_refs = [
+                str(o.get("content", "")) for o in obs
+                if o.get("source") == "graph_search"
+            ]
+            result.graph_path_accuracy = graph_path_accuracy(
+                graph_refs, case.expected_graph_edges
+            )
+
+            # MRR: from retrieval_ref vs expected versions
+            mrr_list: list[str] = [str(agent_result.get("retrieval_ref", ""))]
+            result.mrr = reciprocal_rank(
+                [x for x in mrr_list if x],
+                set(case.expected_document_versions),
             )
 
             # Refusal check
@@ -118,12 +147,18 @@ class EvaluationRunner:
         return result
 
     async def run(self) -> EvaluationReport:
+        import hashlib
+
         cases = self.load_dataset()
         results: list[CaseResult] = []
 
         for case in cases:
             r = await self.run_case(case)
             results.append(r)
+
+        # 计算 dataset hash
+        dataset_bytes = self.dataset_path.read_bytes()
+        dataset_hash = hashlib.sha256(dataset_bytes).hexdigest()[:16]
 
         total = len(results)
         routing_correct = sum(1 for r in results if r.routing_correct)
@@ -133,8 +168,13 @@ class EvaluationRunner:
         )
 
         return EvaluationReport(
-            dataset_version="golden_v1",
+            dataset_version=f"golden_v1 ({dataset_hash})",
             total_cases=total,
+            model_config={
+                "prompt_version": "v1",
+                "dataset_hash": dataset_hash,
+                "code_version": "Task 10 release",
+            },
             routing_accuracy=routing_correct / total if total > 0 else 0.0,
             fact_coverage=sum(r.fact_coverage for r in results) / total if total > 0 else 0.0,
             citation_precision=(
