@@ -145,9 +145,9 @@
 - `Tenant` / `User` / `RefreshToken` 模型已落地。
 - 登录、刷新、登出、`/auth/me` 和基础鉴权依赖都已接通。
 - 在你的真实环境里，本次实际跑通了：
-  - `conda run -n policymind uv run pytest`
-  - `conda run -n policymind uv run ruff check src tests`
-  - `conda run -n policymind uv run mypy src`
+  - `conda run -n policymind python -m pytest`
+  - `conda run -n policymind python -m ruff check src tests`
+  - `conda run -n policymind python -m mypy src`
 
 但从 reviewer 视角看，还不建议把 Task 2 直接判为完全收口，至少应先处理前两条高优先级问题。
 
@@ -155,16 +155,17 @@
 
 实际执行结果：
 
-1. `conda run -n policymind uv run pytest`
+1. `conda run -n policymind python -m pytest`
    - 结果：通过
    - 摘要：`30 passed`
 
-2. `conda run -n policymind uv run ruff check src tests`
+2. `conda run -n policymind python -m ruff check src tests`
    - 结果：通过
 
-3. `conda run -n policymind uv run mypy src`
+3. `conda run -n policymind python -m mypy src`
    - 结果：通过
 
 补充观察：
 
 - `pytest` 过程中出现若干 warning，包括 `datetime.utcnow()` 弃用和 `TestClient/httpx` 的上游弃用提示；这些当前不构成阻塞问题，但后续可以顺手清理。
+

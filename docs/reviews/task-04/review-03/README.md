@@ -27,9 +27,9 @@ Task 4 第 2 次审查中剩余的两个高优先级问题已经修复：
 
 本次在你的真实环境里实际跑通了：
 
-- `conda run -n policymind uv run pytest`
-- `conda run -n policymind uv run ruff check src tests`
-- `conda run -n policymind uv run mypy src`
+- `conda run -n policymind python -m pytest`
+- `conda run -n policymind python -m ruff check src tests`
+- `conda run -n policymind python -m mypy src`
 
 结论判断：
 
@@ -95,16 +95,17 @@ Task 4 第 2 次审查中剩余的两个高优先级问题已经修复：
 
 实际执行结果：
 
-1. `conda run -n policymind uv run pytest`
+1. `conda run -n policymind python -m pytest`
    - 结果：通过
    - 摘要：`62 passed`
 
-2. `conda run -n policymind uv run ruff check src tests`
+2. `conda run -n policymind python -m ruff check src tests`
    - 结果：通过
 
-3. `conda run -n policymind uv run mypy src`
+3. `conda run -n policymind python -m mypy src`
    - 结果：通过
 
 补充说明：
 
 - 并发执行 `conda run` 仍可能出现临时文件竞争错误；顺序重跑后门禁通过。
+

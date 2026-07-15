@@ -75,16 +75,17 @@ def create_app() -> FastAPI:
 未完成：
 
 ```powershell
-uv run pytest
-uv run ruff check src tests
-uv run mypy src
+python -m pytest
+python -m ruff check src tests
+python -m mypy src
 ```
 
 原因：
 
-- 当前环境中 `uv` 不在 PATH 上。
+- 当前环境中的 Python 工具链尚未完整配置。
 - 当前环境未安装 Python 3.12，仅发现 Python 3.10 和 3.13。
 
 说明：
 
 虽然本次仍未在当前机器独立复跑门禁命令，但第 2 次审查中指出的静态阻塞点已明确移除，因此不再作为阻塞 Task 2 的理由。
+

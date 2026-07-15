@@ -79,9 +79,10 @@
 
 ```powershell
 cd D:\project\backend
-uv sync --all-extras
-uv run alembic upgrade head
-uv run uvicorn policymind.main:app --reload
+conda env create -f environment.yml
+conda activate policymind
+python -m alembic upgrade head
+python -m uvicorn policymind.main:app --reload
 ```
 
 不得使用 `python app/main.py` 或修改 `sys.path`。Python包的唯一导入根是：
@@ -997,9 +998,9 @@ refactor: 不改变行为的重构
 
 ```powershell
 cd D:\project\backend
-uv run ruff check src tests
-uv run mypy src
-uv run pytest -m "not integration"
+python -m ruff check src tests
+python -m mypy src
+python -m pytest -m "not integration"
 
 cd D:\project\frontend
 npm run typecheck
@@ -1020,3 +1021,4 @@ npm test -- --run
 - 已提交独立Git commit。
 
 整个项目完成还必须达到设计文档中的评测阈值，并能重复演示“上传→问答→引用”“GraphRAG路径”“MCP写操作HITL”三条主线。
+

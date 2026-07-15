@@ -61,7 +61,7 @@
 
 影响：
 
-- Task 1 的 `uv run mypy src` 可能失败。
+- Task 1 的 `python -m mypy src` 可能失败。
 - 这会让你在还没开始 Task 2 前，就带着一个未关闭的质量门禁问题往前走。
 - 后续 Task 2 如果再引入真实的 `core/config.py` 和 `core/container.py`，你还得再回头确认这里的前瞻写法有没有副作用。
 
@@ -105,16 +105,17 @@
 本次仍未独立执行成功的命令：
 
 ```powershell
-uv run pytest
-uv run ruff check src tests
-uv run mypy src
+python -m pytest
+python -m ruff check src tests
+python -m mypy src
 ```
 
 原因：
 
-- 当前环境中 `uv` 不在 PATH 上。
+- 当前环境中的 Python 工具链尚未完整配置。
 - 当前环境未安装 Python 3.12，仅发现 Python 3.10 和 3.13。
 
 补充说明：
 
 虽然这次没有在本机执行 `mypy`，但“引用了尚不存在模块且忽略码不匹配”这个问题本身已经足够明确，因此这里将其记为待关闭问题，而不是单纯的环境限制。
+

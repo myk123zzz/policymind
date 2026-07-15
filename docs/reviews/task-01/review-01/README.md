@@ -26,7 +26,7 @@ Task 1 已经完成了最小工程骨架，`policymind` 包、`create_app()`、`
 1. `backend/src/policymind/main.py` 没有暴露模块级 `app`，与文档给出的启动命令不兼容。
 2. 根目录 `README.md` 中声明的审查文档和运行手册链接当前不存在，文档导航不自洽。
 
-此外，本次无法按文档原命令完成环境验证，因为当前机器缺少 `uv`，且未安装 Python 3.12。这一点不直接构成 Task 1 代码缺陷，但说明“本机可执行性”仍未被这次审查确认。
+此外，本次无法按文档原命令完成环境验证，因为当前机器未安装 Python 3.12。这一点不直接构成 Task 1 代码缺陷，但说明“本机可执行性”仍未被这次审查确认。
 
 ## 发现的问题
 
@@ -42,7 +42,7 @@ Task 1 已经完成了最小工程骨架，`policymind` 包、`create_app()`、`
 开发手册要求使用：
 
 ```powershell
-uv run uvicorn policymind.main:app --reload
+python -m uvicorn policymind.main:app --reload
 ```
 
 但当前 `main.py` 只定义了 `create_app()`，没有定义模块级 `app = create_app()`。这意味着即使依赖齐全，`uvicorn policymind.main:app` 也无法按文档约定找到应用对象。
@@ -119,16 +119,17 @@ README 已经声明“审查发现的缺陷与后续修复，以 `docs/reviews/2
 未能完成的命令验证：
 
 ```powershell
-uv run pytest
-uv run ruff check src tests
-uv run mypy src
+python -m pytest
+python -m ruff check src tests
+python -m mypy src
 ```
 
 原因：
 
-- 当前环境中 `uv` 不在 PATH 上。
+- 当前环境中的 Python 工具链尚未完整配置。
 - 当前环境未安装 Python 3.12，仅发现 Python 3.10 和 3.13。
 
 结论说明：
 
 本报告中的“发现的问题”基于代码与文档的一致性审查，可以确认成立；但关于测试、ruff、mypy 是否在目标环境全部通过，本次无法独立复核。
+

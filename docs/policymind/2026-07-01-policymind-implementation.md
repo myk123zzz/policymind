@@ -82,16 +82,16 @@ def test_package_and_health(client):
 
 ```powershell
 cd D:\project\backend
-uv run pytest tests/test_smoke.py -q
+python -m pytest tests/test_smoke.py -q
 ```
 
 - [ ] 实现最小包、`create_app()`、liveness；配置 Ruff、mypy、pytest。
 - [ ] 验证：
 
 ```powershell
-uv run pytest
-uv run ruff check src tests
-uv run mypy src
+python -m pytest
+python -m ruff check src tests
+python -m mypy src
 ```
 
 - [ ] Commit：`chore: bootstrap policymind`
@@ -292,10 +292,10 @@ npm run build
 
 ```powershell
 cd D:\project\backend
-uv run ruff check src tests
-uv run mypy src
-uv run pytest -m "not integration" --cov=policymind
-uv run pytest -m integration
+python -m ruff check src tests
+python -m mypy src
+python -m pytest -m "not integration" --cov=policymind
+python -m pytest -m integration
 
 cd D:\project\frontend
 npm run typecheck
@@ -317,3 +317,4 @@ npm run build
 8. API 与前端完成端到端操作。
 9. 评测证明各模块增益。
 10. 可选 Docker 部署和本机运行均有 Runbook。
+

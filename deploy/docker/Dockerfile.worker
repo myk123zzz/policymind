@@ -1,8 +1,8 @@
 FROM python:3.12-slim
 
 WORKDIR /app
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml requirements.txt ./
 COPY src/ src/
 
-RUN pip install uv && uv sync --no-dev
-CMD ["uv", "run", "python", "-c", "from policymind.documents.jobs import ingest_document_job; print('Worker ready')"]
+RUN pip install --no-cache-dir -r requirements.txt && pip install --no-cache-dir .
+CMD ["python", "-c", "from policymind.documents.jobs import ingest_document_job; print('Worker ready')"]

@@ -154,16 +154,17 @@ async def delete(...)
 
 实际执行结果：
 
-1. `conda run -n policymind uv run pytest`
+1. `conda run -n policymind python -m pytest`
    - 结果：通过
    - 摘要：`49 passed`
 
-2. `conda run -n policymind uv run ruff check src tests`
+2. `conda run -n policymind python -m ruff check src tests`
    - 结果：通过
 
-3. `conda run -n policymind uv run mypy src`
+3. `conda run -n policymind python -m mypy src`
    - 结果：通过
 
 补充说明：
 
 - 并发执行 `conda run` 时出现了临时文件竞争错误；顺序重跑后 `ruff` 和 `mypy` 均通过。
+

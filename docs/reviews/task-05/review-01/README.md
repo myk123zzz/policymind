@@ -160,5 +160,6 @@
 
 补充说明：
 
-- 直接使用 `conda run -n policymind uv run pytest` 在当前受限环境中会因为 `uv` 缓存目录权限失败。
+- 直接使用 `conda run -n policymind python -m pytest` 在当前受限环境中会因为系统临时目录权限失败。
 - 我改用仓库内 `.venv` 运行，并把 `TEMP/TMP` 指向工作区内目录后完成了测试复核。
+

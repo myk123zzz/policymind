@@ -193,16 +193,17 @@ Task 4 文档要求测试可用 inline runner，生产用 ARQ，共享同一 pip
 
 实际执行结果：
 
-1. `conda run -n policymind uv run pytest`
+1. `conda run -n policymind python -m pytest`
    - 结果：通过
    - 摘要：`61 passed`
 
-2. `conda run -n policymind uv run ruff check src tests`
+2. `conda run -n policymind python -m ruff check src tests`
    - 结果：通过
 
-3. `conda run -n policymind uv run mypy src`
+3. `conda run -n policymind python -m mypy src`
    - 结果：通过
 
 补充观察：
 
 - `pytest` 通过并不代表 Task 4 已按文档完成；当前测试对“真实副作用”覆盖明显不足。
+

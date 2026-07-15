@@ -33,9 +33,9 @@
 
 此外，本次在你的真实环境里实际跑通了：
 
-- `conda run -n policymind uv run pytest`
-- `conda run -n policymind uv run ruff check src tests`
-- `conda run -n policymind uv run mypy src`
+- `conda run -n policymind python -m pytest`
+- `conda run -n policymind python -m ruff check src tests`
+- `conda run -n policymind python -m mypy src`
 
 结论判断：
 
@@ -126,16 +126,17 @@
 
 实际执行结果：
 
-1. `conda run -n policymind uv run pytest`
+1. `conda run -n policymind python -m pytest`
    - 结果：通过
    - 摘要：`31 passed`
 
-2. `conda run -n policymind uv run ruff check src tests`
+2. `conda run -n policymind python -m ruff check src tests`
    - 结果：通过
 
-3. `conda run -n policymind uv run mypy src`
+3. `conda run -n policymind python -m mypy src`
    - 结果：通过
 
 补充观察：
 
 - `pytest` 仍有 warning，主要来自 `datetime.utcnow()` 弃用和上游 `TestClient/httpx` 提示；当前不构成 Task 2 阻塞项。
+

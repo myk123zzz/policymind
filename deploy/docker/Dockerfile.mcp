@@ -1,9 +1,9 @@
 FROM python:3.12-slim
 
 WORKDIR /app
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml requirements.txt ./
 COPY src/ src/
 
-RUN pip install uv && uv sync --no-dev
+RUN pip install --no-cache-dir -r requirements.txt && pip install --no-cache-dir .
 EXPOSE 8100
-CMD ["uv", "run", "python", "-c", "from policymind.mcp.server import run_stdio_server; run_stdio_server()"]
+CMD ["python", "-c", "from policymind.mcp.server import run_stdio_server; run_stdio_server()"]

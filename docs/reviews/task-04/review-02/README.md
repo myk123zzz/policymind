@@ -31,9 +31,9 @@
 
 本次在你的真实环境里实际跑通了：
 
-- `conda run -n policymind uv run pytest`
-- `conda run -n policymind uv run ruff check src tests`
-- `conda run -n policymind uv run mypy src`
+- `conda run -n policymind python -m pytest`
+- `conda run -n policymind python -m ruff check src tests`
+- `conda run -n policymind python -m mypy src`
 
 但是，这一轮我仍然不建议直接把 Task 4 判定为完全收口。  
 主要还剩 2 个比较实在的问题：
@@ -159,16 +159,17 @@ tenant_id=1
 
 实际执行结果：
 
-1. `conda run -n policymind uv run pytest`
+1. `conda run -n policymind python -m pytest`
    - 结果：通过
    - 摘要：`62 passed`
 
-2. `conda run -n policymind uv run ruff check src tests`
+2. `conda run -n policymind python -m ruff check src tests`
    - 结果：通过
 
-3. `conda run -n policymind uv run mypy src`
+3. `conda run -n policymind python -m mypy src`
    - 结果：通过
 
 补充说明：
 
 - 并发执行 `conda run` 仍可能出现临时文件竞争错误；顺序重跑后门禁通过。
+
