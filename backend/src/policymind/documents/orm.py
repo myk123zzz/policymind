@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     DateTime,
@@ -24,7 +24,7 @@ class Document(Base):
     status: Mapped[str] = mapped_column(String(20), default="active")
     current_version_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
 class DocumentVersion(Base):
@@ -42,7 +42,7 @@ class DocumentVersion(Base):
     effective_to: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     processing_status: Mapped[str] = mapped_column(String(30), default="queued")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
 class IngestionJob(Base):
@@ -58,4 +58,4 @@ class IngestionJob(Base):
     status: Mapped[str] = mapped_column(String(20), default="pending")
     attempt_count: Mapped[int] = mapped_column(Integer, default=0)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))

@@ -150,10 +150,12 @@ class AuthService:
             data=token_data, settings=self.settings
         )
 
+        now_utc = datetime.now(UTC).replace(tzinfo=None)
         rt = RefreshToken(
             user_id=user.id,
             token_hash=hashlib.sha256(refresh_token_str.encode()).hexdigest(),
-            expires_at=datetime.now(UTC) + timedelta(days=7),
+            created_at=now_utc,
+            expires_at=now_utc + timedelta(days=7),
         )
         self.session.add(rt)
         await self.session.flush()
