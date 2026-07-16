@@ -71,7 +71,7 @@ async def retrieval_node(state: AgentState) -> dict[str, object]:
             messages=[
                 {"role": "system", "content": (
                     "你是企业制度问答助手。根据已知的企业制度知识回答问题。"
-                    "如果知识库中没有相关信息，要明确说"暂未找到相关制度"。"
+                    '如果知识库中没有相关信息，要明确说"暂未找到相关制度"。'
                     "回答要简洁、准确，引用具体的制度名称和条款。"
                 )},
                 {"role": "user", "content": query},
