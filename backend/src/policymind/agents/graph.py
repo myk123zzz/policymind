@@ -30,10 +30,13 @@ RouteType = Literal[
 
 async def supervisor_node(state: AgentState) -> dict[str, object]:
     query = state.get("user_query", "").lower()
-    if any(w in query for w in ("审批", "材料", "员工", "工单", "approval chain", "approval")):
+    # 写操作类 → executor（创建工单、审批操作等）
+    if any(w in query for w in ("帮我创建", "创建工单", "提交审批", "approval chain")):
         route = "executor"
+    # 关系/结构类 → graph_search
     elif any(w in query for w in (
         "谁负责", "负责", "属于哪个部门", "流程", "步骤", "关系", "区别",
+        "谁审批", "需要谁", "审批人", "哪个部门",
         "responsible", "process",
     )):
         route = "graph_search"
@@ -86,9 +89,9 @@ async def executor_node(state: AgentState) -> dict[str, object]:
             "_pending_tool": None,
         }
 
-    # 写操作引导：注入待审批参数
+    # 写操作引导：仅显式的创建/提交操作触发待审批
     query = state.get("user_query", "")
-    if any(w in query.lower() for w in ("审批", "approval", "review")):
+    if any(w in query.lower() for w in ("帮我创建", "创建工单", "提交审批")):
         return {
             "tool_call_count": tc + 1,
             "_pending_tool": {
