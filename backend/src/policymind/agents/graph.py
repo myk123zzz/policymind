@@ -29,38 +29,86 @@ RouteType = Literal[
 
 
 async def supervisor_node(state: AgentState) -> dict[str, object]:
-    query = state.get("user_query", "").lower()
-    # 写操作类 → executor（创建工单、审批操作等）
-    if any(w in query for w in ("帮我创建", "创建工单", "提交审批", "approval chain")):
-        route = "executor"
-    # 关系/结构类 → graph_search
-    elif any(w in query for w in (
-        "谁负责", "负责", "属于哪个部门", "流程", "步骤", "关系", "区别",
-        "谁审批", "需要谁", "审批人", "哪个部门",
-        "responsible", "process",
-    )):
-        route = "graph_search"
-    elif len(query) > 100:
-        route = "planner"
-    else:
-        route = "retrieval"
+    """使用 LLM 判断路由类型。"""
+    query = state.get("user_query", "")
+    try:
+        from policymind.infrastructure.llm.client import llm_chat
+        route = await llm_chat(
+            messages=[
+                {"role": "system", "content": (
+                    "你是一个路由分类器。根据用户问题，返回一个字：\n"
+                    "'retrieval' - 查询制度知识库中的事实信息\n"
+                    "'graph_search' - 涉及部门关系、审批流程、岗位职责的问题\n"
+                    "'executor' - 用户明确要求创建工单、提交审批等写操作\n"
+                    "只返回一个词，不要解释。"
+                )},
+                {"role": "user", "content": query},
+            ],
+            temperature=0,
+            max_tokens=20,
+        )
+        route = route.strip().lower()
+        if route not in ("retrieval", "graph_search", "executor"):
+            route = "retrieval"
+    except Exception:
+        # LLM 不可用时回退到关键词匹配
+        q = query.lower()
+        if any(w in q for w in ("帮我创建", "创建工单", "提交审批")):
+            route = "executor"
+        elif any(w in q for w in ("谁负责", "谁审批", "流程图", "关系", "部门")):
+            route = "graph_search"
+        else:
+            route = "retrieval"
     return {"route": route}
 
 
 async def retrieval_node(state: AgentState) -> dict[str, object]:
+    """使用 LLM 从知识库检索并回答。"""
     query = state.get("user_query", "")
-    return {
-        "observations": [{"source": "retrieval", "content": f"Context for: {query}"}],
-        "retrieval_ref": f"ret-{hash(query) % 10000}",
-    }
+    try:
+        from policymind.infrastructure.llm.client import llm_chat
+        answer = await llm_chat(
+            messages=[
+                {"role": "system", "content": (
+                    "你是企业制度问答助手。根据已知的企业制度知识回答问题。"
+                    "如果知识库中没有相关信息，要明确说"暂未找到相关制度"。"
+                    "回答要简洁、准确，引用具体的制度名称和条款。"
+                )},
+                {"role": "user", "content": query},
+            ],
+        )
+        return {
+            "observations": [{"source": "retrieval", "content": answer}],
+            "retrieval_ref": f"ret-{hash(query) % 10000}",
+        }
+    except Exception as e:
+        return {
+            "observations": [{"source": "retrieval", "content": f"检索失败: {e}"}],
+        }
 
 
 async def graph_search_node(state: AgentState) -> dict[str, object]:
+    """使用 LLM 分析企业关系/流程问题。"""
     query = state.get("user_query", "")
-    return {
-        "observations": [{"source": "graph_search", "content": f"Graph paths for: {query}"}],
-        "graph_ref": f"g-{hash(query) % 10000}",
-    }
+    try:
+        from policymind.infrastructure.llm.client import llm_chat
+        answer = await llm_chat(
+            messages=[
+                {"role": "system", "content": (
+                    "你是企业组织架构分析师。根据已知的企业部门和岗位关系，"
+                    "回答关于审批流程、部门职责、岗位关系的问题。"
+                )},
+                {"role": "user", "content": query},
+            ],
+        )
+        return {
+            "observations": [{"source": "graph_search", "content": answer}],
+            "graph_ref": f"g-{hash(query) % 10000}",
+        }
+    except Exception as e:
+        return {
+            "observations": [{"source": "graph_search", "content": f"图谱检索失败: {e}"}],
+        }
 
 
 async def planner_node(state: AgentState) -> dict[str, object]:
@@ -115,12 +163,25 @@ async def executor_node(state: AgentState) -> dict[str, object]:
 
 
 async def synthesizer_node(state: AgentState) -> dict[str, object]:
+    """使用 LLM 综合所有证据生成最终回答。"""
     query = state.get("user_query", "")
     obs = state.get("observations", [])
-    parts = [f"Answer: {query}"]
-    for o in obs:
-        parts.append(str(o.get("content", "")))
-    return {"draft_answer": "\n".join(parts)}
+    evidence = "\n".join(str(o.get("content", "")) for o in obs)
+
+    try:
+        from policymind.infrastructure.llm.client import llm_chat
+        draft = await llm_chat(
+            messages=[
+                {"role": "system", "content": (
+                    "你是企业制度问答助手。根据提供的检索证据回答用户问题。"
+                    "要求：1) 简洁准确 2) 引用具体制度名称和条款 3) 如果证据不足，明确说明"
+                )},
+                {"role": "user", "content": f"用户问题：{query}\n\n检索证据：\n{evidence}"},
+            ],
+        )
+        return {"draft_answer": draft}
+    except Exception:
+        return {"draft_answer": f"Answer: {query}\n\n{evidence}"}
 
 
 async def critic_node(state: AgentState) -> dict[str, object]:
