@@ -22,13 +22,19 @@ async function doLogin() {
 
 <template>
   <div class="login-page">
-    <h1>PolicyMind</h1>
-    <form @submit.prevent="doLogin">
-      <input v-model="tenant" placeholder="Tenant Slug" />
-      <input v-model="username" placeholder="Username" />
-      <input v-model="password" type="password" placeholder="Password" />
-      <button type="submit">Login</button>
-      <p v-if="error" class="error">{{ error }}</p>
-    </form>
+    <div class="login-card">
+      <h1>PolicyMind</h1>
+      <p>Enterprise Policy Intelligence Platform</p>
+      <form @submit.prevent="doLogin">
+        <label>Tenant</label>
+        <input v-model="tenant" placeholder="test-tenant" />
+        <label>Username</label>
+        <input v-model="username" placeholder="admin" />
+        <label>Password</label>
+        <input v-model="password" type="password" placeholder="admin123" />
+        <button type="submit">Sign In</button>
+        <p v-if="error" class="error">{{ error }}</p>
+      </form>
+    </div>
   </div>
 </template>

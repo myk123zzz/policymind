@@ -19,7 +19,7 @@ target_metadata = Base.metadata
 
 # 从项目配置读取数据库 URL，适配同步引擎
 settings = get_settings()
-sync_url = settings.DATABASE_URL.replace("+aiosqlite", "")
+sync_url = settings.DATABASE_URL.replace("+aiosqlite", "").replace("+asyncpg", "")
 config.set_main_option("sqlalchemy.url", sync_url)
 
 

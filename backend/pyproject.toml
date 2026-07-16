@@ -7,6 +7,7 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "sqlalchemy[asyncio]>=2.0",
     "alembic>=1.13",
+    "asyncpg>=0.29",
     "aiosqlite>=0.20",
     "passlib[argon2]>=1.7",
     "python-jose[cryptography]>=3.3",
