@@ -145,6 +145,20 @@ nav.app-nav button:hover { background: var(--bg); }
   border: none; border-radius: var(--radius); font-weight: 600;
 }
 
+.empty-hint { color: var(--text-secondary); font-size: 13px; padding: 20px 0; }
+
+/* Welcome */
+.welcome { text-align: center; padding: 80px 20px; }
+.welcome h2 { font-size: 28px; font-weight: 700; margin-bottom: 12px; }
+.welcome p { color: var(--text-secondary); margin-bottom: 32px; font-size: 15px; }
+.suggestions { display: flex; flex-direction: column; gap: 10px; max-width: 520px; margin: 0 auto; }
+.suggestions button {
+  padding: 14px 20px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); text-align: left; font-size: 14px; color: var(--text);
+  box-shadow: var(--shadow); transition: .15s;
+}
+.suggestions button:hover { border-color: var(--primary); color: var(--primary); }
+
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
