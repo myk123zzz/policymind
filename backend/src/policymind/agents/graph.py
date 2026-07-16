@@ -53,9 +53,12 @@ async def supervisor_node(state: AgentState) -> dict[str, object]:
     except Exception:
         # LLM 不可用时回退到关键词匹配
         q = query.lower()
-        if any(w in q for w in ("帮我创建", "创建工单", "提交审批")):
+        if any(w in q for w in ("帮我创建", "创建工单", "提交审批", "approval chain", "approval", "审批")):
             route = "executor"
-        elif any(w in q for w in ("谁负责", "谁审批", "流程图", "关系", "部门")):
+        elif any(w in q for w in (
+            "谁负责", "谁审批", "流程图", "关系", "部门",
+            "responsible", "process",
+        )):
             route = "graph_search"
         else:
             route = "retrieval"
@@ -139,7 +142,7 @@ async def executor_node(state: AgentState) -> dict[str, object]:
 
     # 写操作引导：仅显式的创建/提交操作触发待审批
     query = state.get("user_query", "")
-    if any(w in query.lower() for w in ("帮我创建", "创建工单", "提交审批")):
+    if any(w in query.lower() for w in ("帮我创建", "创建工单", "提交审批", "approval", "review")):
         return {
             "tool_call_count": tc + 1,
             "_pending_tool": {
